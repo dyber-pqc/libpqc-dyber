@@ -191,41 +191,36 @@ void pqc_shake128_squeeze(pqc_shake128_ctx *ctx,
                            uint8_t *out, size_t len)
 {
     const size_t rate = PQC_SHAKE128_RATE;
-
-    /*
-     * ctx->bufpos tracks the read position within the current squeezed
-     * block.  After finalize it is set to `rate` so that the first call
-     * here recognises the block produced by finalize is fully available
-     * starting at offset 0 -- but we serialise on first access below.
-     */
-
-    /* We keep a serialised copy of the rate portion. */
     uint8_t block[PQC_SHAKE128_RATE];
-
-    /* Serialise current state block. */
-    for (size_t i = 0; i < rate / 8; i++) {
-        for (unsigned j = 0; j < 8; j++) {
-            block[8 * i + j] = (uint8_t)(ctx->state[i] >> (8u * j));
-        }
-    }
-
-    /* If bufpos == rate we have a full fresh block. Reset to 0. */
-    if (ctx->bufpos == rate) {
-        ctx->bufpos = 0;
-    }
+    int need_serialize = 1;
 
     while (len > 0) {
-        size_t avail = rate - ctx->bufpos;
-        if (avail == 0) {
-            pqc_keccak_f1600(ctx->state);
+        /* If we have consumed the current block, squeeze a new one. */
+        if (ctx->bufpos >= rate) {
+            /* After finalize, bufpos == rate and the state already holds
+             * the first squeezed block.  On every subsequent exhaustion
+             * we must permute to get a fresh block. */
+            if (ctx->finalized == 1) {
+                /* First entry after finalize -- block is ready. */
+                ctx->finalized = 2; /* mark: first block consumed */
+            } else {
+                pqc_keccak_f1600(ctx->state);
+            }
+            ctx->bufpos = 0;
+            need_serialize = 1;
+        }
+
+        /* Serialise the rate portion of the state when needed. */
+        if (need_serialize) {
             for (size_t i = 0; i < rate / 8; i++) {
                 for (unsigned j = 0; j < 8; j++) {
                     block[8 * i + j] = (uint8_t)(ctx->state[i] >> (8u * j));
                 }
             }
-            ctx->bufpos = 0;
-            avail = rate;
+            need_serialize = 0;
         }
+
+        size_t avail = rate - ctx->bufpos;
         size_t take = len < avail ? len : avail;
         memcpy(out, block + ctx->bufpos, take);
         ctx->bufpos += take;
@@ -308,29 +303,29 @@ void pqc_shake256_squeeze(pqc_shake256_ctx *ctx,
 {
     const size_t rate = PQC_SHAKE256_RATE;
     uint8_t block[PQC_SHAKE256_RATE];
-
-    for (size_t i = 0; i < rate / 8; i++) {
-        for (unsigned j = 0; j < 8; j++) {
-            block[8 * i + j] = (uint8_t)(ctx->state[i] >> (8u * j));
-        }
-    }
-
-    if (ctx->bufpos == rate) {
-        ctx->bufpos = 0;
-    }
+    int need_serialize = 1;
 
     while (len > 0) {
-        size_t avail = rate - ctx->bufpos;
-        if (avail == 0) {
-            pqc_keccak_f1600(ctx->state);
+        if (ctx->bufpos >= rate) {
+            if (ctx->finalized == 1) {
+                ctx->finalized = 2;
+            } else {
+                pqc_keccak_f1600(ctx->state);
+            }
+            ctx->bufpos = 0;
+            need_serialize = 1;
+        }
+
+        if (need_serialize) {
             for (size_t i = 0; i < rate / 8; i++) {
                 for (unsigned j = 0; j < 8; j++) {
                     block[8 * i + j] = (uint8_t)(ctx->state[i] >> (8u * j));
                 }
             }
-            ctx->bufpos = 0;
-            avail = rate;
+            need_serialize = 0;
         }
+
+        size_t avail = rate - ctx->bufpos;
         size_t take = len < avail ? len : avail;
         memcpy(out, block + ctx->bufpos, take);
         ctx->bufpos += take;

@@ -1,0 +1,58 @@
+# libpqc-dyber OpenSSL 3.x Provider — Example Configuration
+# Copyright (c) 2024-2026 Dyber, Inc.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# Copy this file (or merge the relevant sections) into your openssl.cnf
+# to enable post-quantum algorithms via the libpqc-dyber provider.
+#
+# Usage:
+#   export OPENSSL_CONF=/path/to/this/openssl.cnf
+#   openssl list -kem-algorithms      # should list ML-KEM-512, ML-KEM-768, etc.
+#   openssl list -signature-algorithms # should list ML-DSA-44, ML-DSA-65, etc.
+
+# OpenSSL master config section
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+# Optionally enable PQC groups for TLS
+# ssl_conf = ssl_sect
+
+# --------------------------------------------------------------------------
+# Provider configuration
+# --------------------------------------------------------------------------
+
+[provider_sect]
+default = default_sect
+pqc = pqc_sect
+
+[default_sect]
+activate = 1
+
+[pqc_sect]
+# Path to the provider shared library.
+# Linux:   /usr/lib/ossl-modules/pqc_provider.so
+# macOS:   /usr/local/lib/ossl-modules/pqc_provider.dylib
+# Windows: C:\OpenSSL\lib\ossl-modules\pqc_provider.dll
+#
+# Alternatively, set OPENSSL_MODULES to the directory containing the provider
+# and use just the base name:
+#   module = pqc_provider
+module = /usr/lib/ossl-modules/pqc_provider.so
+activate = 1
+
+# --------------------------------------------------------------------------
+# TLS configuration (optional)
+# --------------------------------------------------------------------------
+
+# [ssl_sect]
+# system_default = ssl_default_sect
+#
+# [ssl_default_sect]
+# # Enable hybrid PQC groups for TLS 1.3 key exchange.
+# # Multiple groups can be listed, separated by colons.
+# Groups = X25519MLKEM768:X25519:P-256
+#
+# # Signature algorithms for certificate verification (if using PQC certs)
+# # SignatureAlgorithms = ML-DSA-65:ML-DSA-87:ECDSA+SHA256
