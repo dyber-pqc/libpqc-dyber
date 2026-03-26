@@ -1,0 +1,331 @@
+# libpqc-dyber - Post-Quantum Cryptography Library
+# Copyright (c) 2024-2026 Dyber, Inc.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# Benchmark CI workflow.
+# Runs performance benchmarks on every push to main and weekly.
+# Detects regressions (>10% slower than baseline) and posts PR comments.
+
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly: Sunday at 02:00 UTC
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  BENCHMARK_ITERATIONS: 500
+  REGRESSION_THRESHOLD: 10  # percent
+
+jobs:
+  benchmark:
+    name: Bench (${{ matrix.os }}, ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+          # macOS (Apple Silicon)
+          - os: macos-14
+            compiler: clang
+            cc: clang
+            cxx: clang++
+          - os: macos-14
+            compiler: gcc
+            cc: gcc-14
+            cxx: g++-14
+          # Windows
+          - os: windows-latest
+            compiler: msvc
+            cc: cl
+            cxx: cl
+          - os: windows-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq cmake ninja-build
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -yq clang
+          fi
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then
+            brew install gcc@14
+          fi
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows' && matrix.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DPQC_BUILD_BENCHMARKS=ON \
+            -DPQC_BUILD_TESTS=OFF
+
+      - name: Configure (Windows MSVC)
+        if: runner.os == 'Windows' && matrix.compiler == 'msvc'
+        run: |
+          cmake -B build -G "Ninja" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DPQC_BUILD_BENCHMARKS=ON `
+            -DPQC_BUILD_TESTS=OFF
+
+      - name: Configure (Windows Clang)
+        if: runner.os == 'Windows' && matrix.compiler == 'clang'
+        run: |
+          cmake -B build -G "Ninja" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=clang `
+            -DCMAKE_CXX_COMPILER=clang++ `
+            -DPQC_BUILD_BENCHMARKS=ON `
+            -DPQC_BUILD_TESTS=OFF
+
+      - name: Build benchmarks
+        run: cmake --build build --config Release --target bench_all bench_kem bench_sig bench_hash
+
+      # ---- Run benchmarks ----
+
+      - name: Run full benchmark suite (CSV)
+        run: |
+          ./build/bench_all --csv --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.csv
+        shell: bash
+
+      - name: Run full benchmark suite (JSON)
+        run: |
+          ./build/bench_all --json --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.json
+        shell: bash
+
+      - name: Run full benchmark suite (Table for logs)
+        run: |
+          ./build/bench_all --iterations ${{ env.BENCHMARK_ITERATIONS }}
+        shell: bash
+
+      # ---- Upload artifacts ----
+
+      - name: Upload benchmark results (CSV)
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ matrix.os }}-${{ matrix.compiler }}-csv
+          path: bench_results.csv
+          retention-days: 90
+
+      - name: Upload benchmark results (JSON)
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ matrix.os }}-${{ matrix.compiler }}-json
+          path: bench_results.json
+          retention-days: 90
+
+  # ---- Regression detection ----
+  regression-check:
+    name: Performance regression check
+    needs: benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download current PR benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmarks-ubuntu-latest-gcc-csv
+          path: current/
+
+      - name: Download baseline benchmark results
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: benchmarks.yml
+          branch: main
+          name: benchmarks-ubuntu-latest-gcc-csv
+          path: baseline/
+        continue-on-error: true
+
+      - name: Compare benchmarks and detect regressions
+        id: regression
+        shell: python3 {0}
+        run: |
+          import csv
+          import os
+          import sys
+
+          threshold = float(os.environ.get("REGRESSION_THRESHOLD", "10"))
+
+          baseline_file = "baseline/bench_results.csv"
+          current_file = "current/bench_results.csv"
+
+          if not os.path.exists(baseline_file):
+              print("No baseline found. Skipping regression check.")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("has_regression=false\n")
+                  f.write("summary=No baseline available for comparison.\n")
+              sys.exit(0)
+
+          def load_csv(path):
+              results = {}
+              with open(path) as f:
+                  reader = csv.DictReader(f)
+                  for row in reader:
+                      key = f"{row['algorithm']}:{row['operation']}"
+                      try:
+                          results[key] = float(row["median_ms"])
+                      except (ValueError, KeyError):
+                          pass
+              return results
+
+          baseline = load_csv(baseline_file)
+          current = load_csv(current_file)
+
+          regressions = []
+          improvements = []
+          summary_lines = []
+
+          for key in sorted(set(baseline.keys()) & set(current.keys())):
+              b = baseline[key]
+              c = current[key]
+              if b <= 0:
+                  continue
+              change_pct = ((c - b) / b) * 100.0
+
+              if change_pct > threshold:
+                  regressions.append((key, b, c, change_pct))
+              elif change_pct < -threshold:
+                  improvements.append((key, b, c, change_pct))
+
+          has_regression = len(regressions) > 0
+
+          lines = []
+          lines.append("## Benchmark Comparison Report\n")
+          lines.append(f"Threshold: {threshold}% | Baseline: main | ")
+          lines.append(f"Regressions: {len(regressions)} | Improvements: {len(improvements)}\n")
+
+          if regressions:
+              lines.append("\n### Regressions (slower)\n")
+              lines.append("| Algorithm | Operation | Baseline (ms) | Current (ms) | Change |")
+              lines.append("|-----------|-----------|---------------|--------------|--------|")
+              for key, b, c, pct in sorted(regressions, key=lambda x: -x[3]):
+                  algo, op = key.split(":", 1)
+                  lines.append(f"| {algo} | {op} | {b:.3f} | {c:.3f} | +{pct:.1f}% |")
+
+          if improvements:
+              lines.append("\n### Improvements (faster)\n")
+              lines.append("| Algorithm | Operation | Baseline (ms) | Current (ms) | Change |")
+              lines.append("|-----------|-----------|---------------|--------------|--------|")
+              for key, b, c, pct in sorted(improvements, key=lambda x: x[3]):
+                  algo, op = key.split(":", 1)
+                  lines.append(f"| {algo} | {op} | {b:.3f} | {c:.3f} | {pct:.1f}% |")
+
+          if not regressions and not improvements:
+              lines.append("\nAll benchmarks within {threshold}% of baseline.")
+
+          summary = "\n".join(lines)
+
+          # Write multiline output
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"has_regression={'true' if has_regression else 'false'}\n")
+
+          # Write summary to a file for the comment step
+          with open("benchmark_summary.md", "w") as f:
+              f.write(summary)
+
+          if has_regression:
+              print(f"REGRESSION DETECTED: {len(regressions)} benchmarks are >{threshold}% slower")
+              for key, b, c, pct in regressions:
+                  print(f"  {key}: {b:.3f}ms -> {c:.3f}ms (+{pct:.1f}%)")
+          else:
+              print("No performance regressions detected.")
+
+      - name: Post benchmark comparison as PR comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: benchmark-results
+          path: benchmark_summary.md
+
+      - name: Fail on regression
+        if: steps.regression.outputs.has_regression == 'true'
+        run: |
+          echo "Performance regression detected! See PR comment for details."
+          exit 1
+
+  # ---- Historical tracking ----
+  store-results:
+    name: Store benchmark history
+    needs: benchmark
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          path: results/
+
+      - name: Create benchmark summary
+        shell: bash
+        run: |
+          echo "# Benchmark Results - $(date -u +%Y-%m-%dT%H:%M:%SZ)" > summary.md
+          echo "" >> summary.md
+          echo "Commit: ${{ github.sha }}" >> summary.md
+          echo "" >> summary.md
+
+          for dir in results/benchmarks-*-csv; do
+            if [ -d "$dir" ]; then
+              platform=$(basename "$dir" | sed 's/benchmarks-//' | sed 's/-csv//')
+              echo "## Platform: $platform" >> summary.md
+              echo "" >> summary.md
+              echo '```' >> summary.md
+              head -20 "$dir/bench_results.csv" >> summary.md
+              echo '...' >> summary.md
+              echo '```' >> summary.md
+              echo "" >> summary.md
+            fi
+          done
+
+      - name: Upload combined benchmark history
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-history-${{ github.sha }}
+          path: |
+            results/
+            summary.md
+          retention-days: 365

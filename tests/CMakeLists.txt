@@ -43,11 +43,41 @@ add_test(NAME test_integration COMMAND test_integration)
 
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)
+    # Common include path for bench_common.h
+    set(BENCH_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/bench ${PQC_INCLUDE_DIRS})
+
+    # Internal hash headers needed by bench_hash and bench_all
+    set(BENCH_INTERNAL_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/common/hash)
+
     add_executable(bench_kem bench/bench_kem.c)
     target_link_libraries(bench_kem PRIVATE pqc_static)
-    target_include_directories(bench_kem PRIVATE ${PQC_INCLUDE_DIRS})
+    target_include_directories(bench_kem PRIVATE ${BENCH_INCLUDE_DIRS})
 
     add_executable(bench_sig bench/bench_sig.c)
     target_link_libraries(bench_sig PRIVATE pqc_static)
-    target_include_directories(bench_sig PRIVATE ${PQC_INCLUDE_DIRS})
+    target_include_directories(bench_sig PRIVATE ${BENCH_INCLUDE_DIRS})
+
+    add_executable(bench_hash bench/bench_hash.c)
+    target_link_libraries(bench_hash PRIVATE pqc_static)
+    target_include_directories(bench_hash PRIVATE ${BENCH_INCLUDE_DIRS} ${BENCH_INTERNAL_DIRS})
+
+    add_executable(bench_all bench/bench_all.c)
+    target_link_libraries(bench_all PRIVATE pqc_static)
+    target_include_directories(bench_all PRIVATE ${BENCH_INCLUDE_DIRS} ${BENCH_INTERNAL_DIRS})
+
+    # Link math library on non-Windows platforms (for sqrt in stats)
+    if(NOT WIN32)
+        target_link_libraries(bench_kem PRIVATE m)
+        target_link_libraries(bench_sig PRIVATE m)
+        target_link_libraries(bench_hash PRIVATE m)
+        target_link_libraries(bench_all PRIVATE m)
+    endif()
+
+    # Link psapi on Windows for memory tracking
+    if(WIN32)
+        target_link_libraries(bench_kem PRIVATE psapi)
+        target_link_libraries(bench_sig PRIVATE psapi)
+        target_link_libraries(bench_hash PRIVATE psapi)
+        target_link_libraries(bench_all PRIVATE psapi)
+    endif()
 endif()
