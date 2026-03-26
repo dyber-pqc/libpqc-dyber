@@ -1,0 +1,14 @@
+PROJECT_NAME           = "libpqc-dyber"
+PROJECT_NUMBER         = "0.1.0"
+PROJECT_BRIEF          = "Post-Quantum Cryptography Library by Dyber, Inc."
+OUTPUT_DIRECTORY       = .
+INPUT                  = ../../include/pqc
+FILE_PATTERNS          = *.h
+RECURSIVE              = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+EXTRACT_ALL            = YES
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = YES
+SORT_MEMBER_DOCS       = NO
+HTML_OUTPUT            = html

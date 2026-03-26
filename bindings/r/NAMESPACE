@@ -1,0 +1,17 @@
+# libpqc-dyber - Post-Quantum Cryptography Library
+# Copyright (c) 2024-2026 Dyber, Inc.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+useDynLib(pqcDyber, .registration = TRUE)
+
+export(pqc_version)
+export(pqc_kem_algorithms)
+export(pqc_sig_algorithms)
+export(kem_new)
+export(kem_keygen)
+export(kem_encaps)
+export(kem_decaps)
+export(sig_new)
+export(sig_keygen)
+export(sig_sign)
+export(sig_verify)

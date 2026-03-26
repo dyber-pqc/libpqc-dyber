@@ -1,0 +1,16 @@
+Package: pqcDyber
+Title: Post-Quantum Cryptography Bindings
+Version: 1.0.0
+Authors@R: c(
+    person("Dyber, Inc.", role = c("aut", "cre", "cph"),
+           email = "info@dyber.com"))
+Description: R bindings for the libpqc-dyber post-quantum cryptography library,
+    providing access to ML-KEM, ML-DSA, and other post-quantum algorithms
+    standardized by NIST.
+License: Apache License (>= 2) | MIT + file LICENSE
+URL: https://github.com/dyber/libpqc-dyber
+BugReports: https://github.com/dyber/libpqc-dyber/issues
+Encoding: UTF-8
+NeedsCompilation: yes
+SystemRequirements: libpqc-dyber (>= 1.0.0)
+RoxygenNote: 7.3.0

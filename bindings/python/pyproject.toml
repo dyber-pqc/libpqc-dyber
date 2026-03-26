@@ -1,0 +1,44 @@
+# libpqc-dyber - Post-Quantum Cryptography Library
+# Copyright (c) 2024-2026 Dyber, Inc.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pqc-dyber"
+version = "0.1.0"
+description = "Post-Quantum Cryptography Library by Dyber, Inc."
+license = "Apache-2.0 OR MIT"
+requires-python = ">=3.8"
+authors = [
+    { name = "Dyber, Inc." },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+]
+keywords = ["post-quantum", "cryptography", "kem", "signature", "ml-kem", "ml-dsa"]
+
+[project.urls]
+Homepage = "https://github.com/dyber/libpqc-dyber"
+Documentation = "https://github.com/dyber/libpqc-dyber"
+Repository = "https://github.com/dyber/libpqc-dyber"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

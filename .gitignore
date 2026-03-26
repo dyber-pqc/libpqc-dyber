@@ -1,0 +1,77 @@
+# Build directories
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Object files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.whl
+
+# Rust
+bindings/rust/target/
+
+# Go
+bindings/go/vendor/
+
+# Java
+bindings/java/target/
+*.class
+*.jar
+
+# C#
+bindings/csharp/bin/
+bindings/csharp/obj/
+
+# Node
+node_modules/
+bindings/javascript/build/
+bindings/typescript/dist/
+
+# Dart
+.dart_tool/
+.packages
+
+# R
+bindings/r/src/*.o
+bindings/r/src/*.so
+
+# MATLAB
+*.mex*
+*.asv
+
+# Coverage
+*.gcov
+*.gcda
+*.gcno
+coverage/
+
+# Doxygen
+docs/api/html/
+docs/api/latex/

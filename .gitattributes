@@ -1,0 +1,33 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# C/C++
+*.c text
+*.h text
+*.cpp text
+*.hpp text
+
+# Assembly
+*.S text
+*.s text
+
+# Scripts
+*.sh text eol=lf
+*.py text
+*.rb text
+*.pl text
+
+# Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.a binary
+*.lib binary
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary

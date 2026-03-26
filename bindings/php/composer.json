@@ -1,0 +1,22 @@
+{
+    "name": "dyber/pqc",
+    "description": "Post-Quantum Cryptography library bindings for PHP (via FFI)",
+    "type": "library",
+    "license": "(Apache-2.0 OR MIT)",
+    "authors": [
+        {
+            "name": "Dyber, Inc.",
+            "homepage": "https://dyber.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-ffi": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dyber\\PQC\\": "src/"
+        }
+    },
+    "minimum-stability": "stable"
+}

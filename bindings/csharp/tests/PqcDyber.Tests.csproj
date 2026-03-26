@@ -1,0 +1,25 @@
+<!--
+  libpqc-dyber - Post-Quantum Cryptography Library
+  Copyright (c) 2024-2026 Dyber, Inc.
+  SPDX-License-Identifier: Apache-2.0 OR MIT
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Dyber.PQC.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PqcDyber.csproj" />
+  </ItemGroup>
+
+</Project>

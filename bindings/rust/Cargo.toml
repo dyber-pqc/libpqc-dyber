@@ -1,0 +1,21 @@
+# libpqc-dyber - Post-Quantum Cryptography Library
+# Copyright (c) 2024-2026 Dyber, Inc.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+[package]
+name = "pqc-dyber"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dyber, Inc."]
+license = "Apache-2.0 OR MIT"
+description = "Rust bindings for the libpqc-dyber post-quantum cryptography library"
+repository = "https://github.com/dyber-pqc/libpqc-dyber"
+keywords = ["post-quantum", "cryptography", "kem", "signature", "pqc"]
+categories = ["cryptography", "api-bindings"]
+links = "pqc"
+
+[build-dependencies]
+pkg-config = "0.3"
+cmake = "0.1"
+
+[dev-dependencies]

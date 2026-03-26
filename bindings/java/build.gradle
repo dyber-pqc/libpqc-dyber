@@ -1,0 +1,68 @@
+/*
+ * libpqc-dyber - Post-Quantum Cryptography Library
+ * Copyright (c) 2024-2026 Dyber, Inc.
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
+ */
+
+plugins {
+    id 'java-library'
+}
+
+group = 'com.dyber'
+version = '0.1.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// Build the JNI native library
+tasks.register('compileJni', Exec) {
+    def javaHome = System.getenv('JAVA_HOME') ?: System.getProperty('java.home')
+    def osName = System.getProperty('os.name').toLowerCase()
+    def jniInclude = "${javaHome}/include"
+    def jniPlatformInclude
+
+    if (osName.contains('linux')) {
+        jniPlatformInclude = "${jniInclude}/linux"
+    } else if (osName.contains('mac') || osName.contains('darwin')) {
+        jniPlatformInclude = "${jniInclude}/darwin"
+    } else if (osName.contains('win')) {
+        jniPlatformInclude = "${jniInclude}/win32"
+    }
+
+    def pqcInclude = "${projectDir}/../../include"
+    def sourceFile = "${projectDir}/src/main/native/com_dyber_pqc_PQC.c"
+
+    if (osName.contains('win')) {
+        commandLine 'cl', '/I', jniInclude, '/I', jniPlatformInclude, '/I', pqcInclude,
+                    '/LD', sourceFile, '/Fe:pqc_jni.dll', '/link', 'pqc.lib'
+    } else {
+        def ext = osName.contains('mac') ? 'dylib' : 'so'
+        commandLine 'cc', '-shared', '-fPIC',
+                    "-I${jniInclude}", "-I${jniPlatformInclude}", "-I${pqcInclude}",
+                    sourceFile, '-lpqc', "-o", "libpqc_jni.${ext}"
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+            'Implementation-Title': 'pqc-dyber',
+            'Implementation-Version': version,
+            'Implementation-Vendor': 'Dyber, Inc.'
+        )
+    }
+}

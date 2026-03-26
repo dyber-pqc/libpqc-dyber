@@ -1,0 +1,67 @@
+/*
+ * libpqc-dyber - Post-Quantum Cryptography Library
+ * Copyright (c) 2024-2026 Dyber, Inc.
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
+ *
+ * Auto-generated configuration header. Do not edit.
+ */
+
+#ifndef PQC_CONFIG_H
+#define PQC_CONFIG_H
+
+#define PQC_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define PQC_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define PQC_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define PQC_VERSION_STRING "@PROJECT_VERSION@"
+
+/* Platform */
+#cmakedefine PQC_OS_WINDOWS
+#cmakedefine PQC_OS_LINUX
+#cmakedefine PQC_OS_MACOS
+#cmakedefine PQC_OS_FREEBSD
+#cmakedefine PQC_OS_UNIX
+
+/* Architecture */
+#cmakedefine PQC_ARCH_X86_64
+#cmakedefine PQC_ARCH_AARCH64
+#cmakedefine PQC_ARCH_X86
+#cmakedefine PQC_ARCH_ARM
+#cmakedefine PQC_ARCH_GENERIC
+
+/* SIMD */
+#cmakedefine PQC_HAS_AVX2
+#cmakedefine PQC_HAS_AVX512
+#cmakedefine PQC_HAS_NEON
+#cmakedefine PQC_HAS_SVE
+#cmakedefine PQC_HAS_SHA_NI
+#cmakedefine PQC_HAS_PCLMUL
+#cmakedefine PQC_HAS_BMI2
+
+/* KEM algorithms */
+#cmakedefine PQC_ENABLE_KEM_MLKEM
+#cmakedefine PQC_ENABLE_KEM_HQC
+#cmakedefine PQC_ENABLE_KEM_BIKE
+#cmakedefine PQC_ENABLE_KEM_MCELIECE
+#cmakedefine PQC_ENABLE_KEM_FRODO
+#cmakedefine PQC_ENABLE_KEM_NTRU
+#cmakedefine PQC_ENABLE_KEM_NTRUPRIME
+
+/* Signature algorithms */
+#cmakedefine PQC_ENABLE_SIG_MLDSA
+#cmakedefine PQC_ENABLE_SIG_SLHDSA
+#cmakedefine PQC_ENABLE_SIG_FNDSA
+#cmakedefine PQC_ENABLE_SIG_SPHINCSPLUS
+#cmakedefine PQC_ENABLE_SIG_MAYO
+#cmakedefine PQC_ENABLE_SIG_UOV
+#cmakedefine PQC_ENABLE_SIG_SNOVA
+#cmakedefine PQC_ENABLE_SIG_CROSS
+#cmakedefine PQC_ENABLE_SIG_LMS
+#cmakedefine PQC_ENABLE_SIG_XMSS
+
+/* Hybrid */
+#cmakedefine PQC_ENABLE_HYBRID
+
+/* ASM */
+#cmakedefine PQC_ENABLE_ASM
+
+#endif /* PQC_CONFIG_H */

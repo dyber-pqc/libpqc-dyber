@@ -1,0 +1,19 @@
+# libpqc-dyber - Post-Quantum Cryptography Library
+# Copyright (c) 2024-2026 Dyber, Inc.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+name: pqc_dyber
+description: Post-Quantum Cryptography library bindings for Dart using dart:ffi.
+version: 1.0.0
+homepage: https://github.com/dyber/libpqc-dyber
+repository: https://github.com/dyber/libpqc-dyber
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  ffi: ^2.0.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0

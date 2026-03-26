@@ -1,0 +1,64 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.{c,h}]
+indent_style = space
+indent_size = 4
+
+[*.{cpp,hpp}]
+indent_style = space
+indent_size = 4
+
+[*.{py}]
+indent_style = space
+indent_size = 4
+
+[*.{js,ts,json}]
+indent_style = space
+indent_size = 2
+
+[*.{go}]
+indent_style = tab
+
+[*.{rs}]
+indent_style = space
+indent_size = 4
+
+[*.{java,kt,scala}]
+indent_style = space
+indent_size = 4
+
+[*.{cs}]
+indent_style = space
+indent_size = 4
+
+[*.{rb}]
+indent_style = space
+indent_size = 2
+
+[*.{swift}]
+indent_style = space
+indent_size = 4
+
+[*.{cmake}]
+indent_style = space
+indent_size = 4
+
+[CMakeLists.txt]
+indent_style = space
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{S,s,asm}]
+indent_style = tab
+indent_size = 8

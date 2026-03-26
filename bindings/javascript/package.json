@@ -1,0 +1,35 @@
+{
+  "name": "@dyber/pqc",
+  "version": "1.0.0",
+  "description": "Post-Quantum Cryptography library bindings for Node.js (N-API)",
+  "main": "lib/index.js",
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp build",
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "pqc",
+    "post-quantum",
+    "cryptography",
+    "ml-kem",
+    "ml-dsa",
+    "kem",
+    "signature"
+  ],
+  "author": "Dyber, Inc.",
+  "license": "(Apache-2.0 OR MIT)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dyber/libpqc-dyber"
+  },
+  "gypfile": true,
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "lib/",
+    "src/",
+    "binding.gyp"
+  ]
+}

@@ -1,0 +1,26 @@
+<!--
+  libpqc-dyber - Post-Quantum Cryptography Library
+  Copyright (c) 2024-2026 Dyber, Inc.
+  SPDX-License-Identifier: Apache-2.0 OR MIT
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <RootNamespace>Dyber.PQC</RootNamespace>
+    <AssemblyName>PqcDyber</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>Dyber, Inc.</Authors>
+    <Company>Dyber, Inc.</Company>
+    <Copyright>Copyright (c) 2024-2026 Dyber, Inc.</Copyright>
+    <Description>Post-Quantum Cryptography library bindings for .NET</Description>
+    <PackageId>Dyber.PQC</PackageId>
+    <PackageLicenseExpression>Apache-2.0 OR MIT</PackageLicenseExpression>
+    <PackageTags>pqc;post-quantum;cryptography;ml-kem;ml-dsa;kem;signature</PackageTags>
+    <RepositoryUrl>https://github.com/dyber/libpqc-dyber</RepositoryUrl>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
