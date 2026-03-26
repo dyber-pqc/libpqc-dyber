@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include "bike.h"
+#include "pqc/common.h"
 #include "bike_params.h"
 #include "core/common/hash/sha3.h"
 

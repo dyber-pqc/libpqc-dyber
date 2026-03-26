@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "pqc/pqc.h"
 
 #define BENCH_ITERATIONS 100
@@ -17,9 +20,16 @@
 static const uint8_t bench_msg[] = "Benchmark message for libpqc-dyber signature performance testing";
 
 static double get_time_ms(void) {
+#ifdef _WIN32
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (double)count.QuadPart / (double)freq.QuadPart * 1000.0;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+#endif
 }
 
 static void bench_sig(const char *name) {

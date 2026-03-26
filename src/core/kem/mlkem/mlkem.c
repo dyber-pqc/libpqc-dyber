@@ -263,3 +263,48 @@ pqc_status_t pqc_mlkem_decaps(const pqc_mlkem_params_t *params,
 
     return PQC_OK;
 }
+
+/* ================================================================= */
+/*  Vtable registration for the unified KEM API                        */
+/* ================================================================= */
+
+#include "pqc/algorithms.h"
+#include "core/kem/kem_internal.h"
+
+#define DEFINE_MLKEM_OPS(SUFFIX, PARAMS, LEVEL)                                \
+    static pqc_status_t mlkem_##SUFFIX##_keygen(uint8_t *pk, uint8_t *sk) {    \
+        return pqc_mlkem_keygen(&PARAMS, pk, sk);                              \
+    }                                                                          \
+    static pqc_status_t mlkem_##SUFFIX##_encaps(uint8_t *ct, uint8_t *ss,      \
+                                                 const uint8_t *pk) {          \
+        return pqc_mlkem_encaps(&PARAMS, ct, ss, pk);                          \
+    }                                                                          \
+    static pqc_status_t mlkem_##SUFFIX##_decaps(uint8_t *ss,                   \
+                                                 const uint8_t *ct,            \
+                                                 const uint8_t *sk) {          \
+        return pqc_mlkem_decaps(&PARAMS, ss, ct, sk);                          \
+    }                                                                          \
+    static const pqc_kem_vtable_t mlkem_##SUFFIX##_vtable = {                  \
+        .algorithm_name    = PQC_KEM_ML_KEM_##SUFFIX,                          \
+        .security_level    = PQC_SECURITY_LEVEL_##LEVEL,                       \
+        .nist_standard     = "FIPS 203",                                       \
+        .public_key_size   = PQC_MLKEM##SUFFIX##_PUBLICKEYBYTES,               \
+        .secret_key_size   = PQC_MLKEM##SUFFIX##_SECRETKEYBYTES,               \
+        .ciphertext_size   = PQC_MLKEM##SUFFIX##_CIPHERTEXTBYTES,              \
+        .shared_secret_size = PQC_MLKEM_SSBYTES,                               \
+        .keygen = mlkem_##SUFFIX##_keygen,                                     \
+        .encaps = mlkem_##SUFFIX##_encaps,                                     \
+        .decaps = mlkem_##SUFFIX##_decaps,                                     \
+    };
+
+DEFINE_MLKEM_OPS(512,  PQC_MLKEM_512,  1)
+DEFINE_MLKEM_OPS(768,  PQC_MLKEM_768,  3)
+DEFINE_MLKEM_OPS(1024, PQC_MLKEM_1024, 5)
+
+int pqc_kem_mlkem_register(void) {
+    int rc = 0;
+    rc |= pqc_kem_add_vtable(&mlkem_512_vtable);
+    rc |= pqc_kem_add_vtable(&mlkem_768_vtable);
+    rc |= pqc_kem_add_vtable(&mlkem_1024_vtable);
+    return rc;
+}

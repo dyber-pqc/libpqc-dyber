@@ -18,6 +18,9 @@
 #include "field_p256.h"
 #include "ecdsa_p256.h"
 
+/* Defined in field_p256.c */
+extern uint64_t sub256_v2(p256_fe r, const p256_fe a, const p256_fe b);
+
 /* ------------------------------------------------------------------ */
 /* RFC 6979 deterministic nonce generation                              */
 /* ------------------------------------------------------------------ */
@@ -217,9 +220,6 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
 
     return 0;
 }
-
-/* Defined in field_p256.c */
-extern uint64_t sub256_v2(p256_fe r, const p256_fe a, const p256_fe b);
 
 /* ------------------------------------------------------------------ */
 /* Verification                                                         */

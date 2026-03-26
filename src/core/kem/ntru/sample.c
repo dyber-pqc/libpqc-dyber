@@ -37,9 +37,8 @@ void ntru_sample_fixed_weight(ntru_poly_t *r, const uint8_t *seed,
     }
 
     /* Derive randomness from seed */
-    size_t rand_needed = (size_t)n * 4;
-    uint8_t *rand_buf = (uint8_t *)__builtin_alloca(rand_needed < 4096 ? rand_needed : 4096);
-    /* Use stack-allocated buffer for reasonable sizes, or SHAKE directly */
+    uint8_t rand_buf[4096]; /* Fixed-size stack buffer */
+    (void)rand_buf; /* Buffer available but SHAKE squeeze is used directly below */
 
     pqc_shake256_ctx ctx;
     pqc_shake256_init(&ctx);

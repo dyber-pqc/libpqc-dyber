@@ -16,6 +16,17 @@
 #include "pqc/rand.h"
 #include "core/common/hash/sha3.h"
 
+/* Portable replacement for __builtin_parity */
+static inline int portable_parity(unsigned int x)
+{
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    x ^= x >> 2;
+    x ^= x >> 1;
+    return (int)(x & 1);
+}
+
 /* ------------------------------------------------------------------ */
 /* Generate random weight-t error vector                               */
 /* ------------------------------------------------------------------ */
@@ -122,7 +133,7 @@ int mceliece_encrypt(uint8_t *ct, uint8_t *e,
                 }
             }
 
-            bit ^= (uint8_t)__builtin_parity(pk_row[byte] & e_val);
+            bit ^= (uint8_t)portable_parity((unsigned int)(pk_row[byte] & e_val));
         }
 
         if (bit & 1) {

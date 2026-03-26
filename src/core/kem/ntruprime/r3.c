@@ -113,15 +113,17 @@ int r3_recip(r3_poly_t *r, const r3_poly_t *a, int pp)
     while (dg >= 0) {
         /* Ensure df >= dg; if not, swap */
         if (df < dg) {
-            int8_t *tmp_p;
+            int8_t sw[SNTRUP_MAX_P + 1];
             int td;
-            tmp_p = f; f = g; g = tmp_p;
-            /* Can't swap stack arrays by pointer; use manual swap */
-            /* Actually, since these are stack arrays, we need memcpy */
-            int8_t tmp_arr[SNTRUP_MAX_P + 1];
-            memcpy(tmp_arr, f, sizeof(tmp_arr)); /* f already swapped via intent */
-            /* Re-approach: just do it properly */
-            break; /* fallthrough to alternate implementation below */
+
+            memcpy(sw, f, sizeof(sw));
+            memcpy(f, g, sizeof(f));
+            memcpy(g, sw, sizeof(g));
+            td = df; df = dg; dg = td;
+
+            memcpy(sw, u, sizeof(sw));
+            memcpy(u, v, sizeof(u));
+            memcpy(v, sw, sizeof(v));
         }
 
         if (f[df] == 0) {

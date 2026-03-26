@@ -10,8 +10,10 @@
  * the underlying PRNG.
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include "frodo.h"
+#include "pqc/common.h"
 #include "frodo_params.h"
 #include "core/common/hash/sha3.h"
 

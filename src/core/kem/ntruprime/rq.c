@@ -18,6 +18,20 @@
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Modular inverse of x mod q (q is prime) using extended Euclidean algorithm */
+static int32_t mod_inv_q(int32_t x_val, int q)
+{
+    int32_t a = ((x_val % q) + q) % q;
+    int32_t b = q;
+    int32_t x0 = 0, x1 = 1, t, qq;
+    while (a > 1) {
+        qq = a / b;
+        t = b; b = a % b; a = t;
+        t = x0; x0 = x1 - qq * x0; x1 = t;
+    }
+    return ((x1 % q) + q) % q;
+}
+
 /* Center-reduce modulo q: result in [-(q-1)/2, (q-1)/2] */
 static int16_t mod_q(int32_t x, int q)
 {
@@ -82,7 +96,7 @@ void rq_mul(rq_poly_t *r, const rq_poly_t *a, const rq_poly_t *b,
     int q = p->q;
     int prod_len = 2 * pp - 1;
 
-    int32_t *tmp = (int32_t *)__builtin_alloca((size_t)prod_len * sizeof(int32_t));
+    int32_t tmp[2 * SNTRUP_MAX_P];
     memset(tmp, 0, (size_t)prod_len * sizeof(int32_t));
 
     for (int i = 0; i < pp; i++) {
@@ -108,7 +122,7 @@ void rq_mul_small(rq_poly_t *r, const rq_poly_t *a, const r3_poly_t *b,
     int q = p->q;
     int prod_len = 2 * pp - 1;
 
-    int32_t *tmp = (int32_t *)__builtin_alloca((size_t)prod_len * sizeof(int32_t));
+    int32_t tmp[2 * SNTRUP_MAX_P];
     memset(tmp, 0, (size_t)prod_len * sizeof(int32_t));
 
     for (int i = 0; i < pp; i++) {
@@ -146,10 +160,10 @@ int rq_recip(rq_poly_t *r, const rq_poly_t *a, const sntrup_params_t *p)
      * If gcd is a nonzero constant, a is invertible. */
 
     int len = pp + 1;
-    int32_t *f = (int32_t *)__builtin_alloca((size_t)len * sizeof(int32_t));
-    int32_t *g = (int32_t *)__builtin_alloca((size_t)len * sizeof(int32_t));
-    int32_t *u = (int32_t *)__builtin_alloca((size_t)len * sizeof(int32_t));
-    int32_t *v = (int32_t *)__builtin_alloca((size_t)len * sizeof(int32_t));
+    int32_t f[SNTRUP_MAX_P + 1];
+    int32_t g[SNTRUP_MAX_P + 1];
+    int32_t u[SNTRUP_MAX_P + 1];
+    int32_t v[SNTRUP_MAX_P + 1];
 
     memset(f, 0, (size_t)len * sizeof(int32_t));
     memset(g, 0, (size_t)len * sizeof(int32_t));
@@ -175,32 +189,14 @@ int rq_recip(rq_poly_t *r, const rq_poly_t *a, const sntrup_params_t *p)
 
     if (df < 0) return -1;
 
-    /*
-     * Modular inverse of x mod q (q is prime, so use Fermat's little theorem).
-     */
-    int32_t (*inv_mod_q)(int32_t, int) = NULL;
-    /* Inline: compute modular inverse using extended Euclidean */
-
-    /* Helper: modular inverse of x mod q */
-    /* We'll inline this as a function pointer is clunky here */
-    #define MOD_INV_Q(x_val) ({ \
-        int32_t _a = ((x_val) % q + q) % q, _b = q, _t, _x0 = 0, _x1 = 1; \
-        while (_a > 1) { \
-            int32_t _qq = _a / _b; \
-            _t = _b; _b = _a % _b; _a = _t; \
-            _t = _x0; _x0 = _x1 - _qq * _x0; _x1 = _t; \
-        } \
-        ((_x1 % q + q) % q); \
-    })
-
-    (void)inv_mod_q;
+    /* mod_inv_q() is defined as a static function above */
 
     /* Extended GCD loop */
     while (dg >= 0) {
         while (df >= dg && df >= 0) {
             if (f[df] == 0) { df--; continue; }
 
-            int32_t coeff = (int32_t)((int64_t)f[df] * (int64_t)MOD_INV_Q(g[dg]) % q);
+            int32_t coeff = (int32_t)((int64_t)f[df] * (int64_t)mod_inv_q(g[dg], q) % q);
             coeff = ((coeff % q) + q) % q;
             int shift = df - dg;
 
@@ -221,26 +217,26 @@ int rq_recip(rq_poly_t *r, const rq_poly_t *a, const sntrup_params_t *p)
             while (df >= 0 && f[df] == 0) df--;
         }
 
-        /* Swap f,g and u,v */
-        int32_t *tmp_ptr;
-        int td;
-        tmp_ptr = f; f = g; g = tmp_ptr;
-        td = df; df = dg; dg = td;
-        tmp_ptr = u; u = v; v = tmp_ptr;
+        /* Swap f,g and u,v element-by-element */
+        {
+            int td;
+            int32_t t;
+            for (int i = 0; i < len; i++) { t = f[i]; f[i] = g[i]; g[i] = t; }
+            td = df; df = dg; dg = td;
+            for (int i = 0; i < len; i++) { t = u[i]; u[i] = v[i]; v[i] = t; }
+        }
     }
 
     /* f should be a constant now */
     if (df != 0 && df != -1) return -1;
     if (df < 0) return -1;
 
-    int32_t inv_f0 = MOD_INV_Q(f[0]);
+    int32_t inv_f0 = mod_inv_q(f[0], q);
 
     for (int i = 0; i < pp; i++) {
         int32_t val = (int32_t)(((int64_t)u[i] * (int64_t)inv_f0) % q);
         r->coeffs[i] = mod_q(val, q);
     }
-
-    #undef MOD_INV_Q
 
     /* Verify: a * r should be 1 mod (x^p - x - 1) mod q */
 
