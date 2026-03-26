@@ -21,5 +21,5 @@ lazy val root = (project in file("."))
     javaOptions += s"-Djava.library.path=${baseDirectory.value}/../../build",
 
     licenses := Seq("Apache-2.0 OR MIT" -> url("https://opensource.org/licenses/Apache-2.0")),
-    homepage := Some(url("https://github.com/dyber/libpqc-dyber")),
+    homepage := Some(url("https://github.com/dyber-pqc/libpqc-dyber")),
   )

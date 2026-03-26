@@ -17,7 +17,7 @@
     <PackageId>Dyber.PQC</PackageId>
     <PackageLicenseExpression>Apache-2.0 OR MIT</PackageLicenseExpression>
     <PackageTags>pqc;post-quantum;cryptography;ml-kem;ml-dsa;kem;signature</PackageTags>
-    <RepositoryUrl>https://github.com/dyber/libpqc-dyber</RepositoryUrl>
+    <RepositoryUrl>https://github.com/dyber-pqc/libpqc-dyber</RepositoryUrl>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

@@ -6,7 +6,7 @@ If you discover a security vulnerability in libpqc-dyber, please report it respo
 
 **DO NOT** open a public GitHub issue for security vulnerabilities.
 
-Instead, please email: **security@dyber.com**
+Instead, please email: **security@dyber.org**
 
 Include:
 - Description of the vulnerability

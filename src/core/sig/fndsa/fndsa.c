@@ -3,32 +3,102 @@
  * Copyright (c) 2024-2026 Dyber, Inc.
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
- * FN-DSA (FIPS 206, formerly Falcon) - stub implementation.
+ * FN-DSA (FIPS 206, formerly Falcon) -- main entry point.
+ *
+ * This file provides the top-level API functions that are registered
+ * in the library's signature vtable, dispatching to the internal
+ * FN-DSA implementations (keygen.c, sign.c, vrfy.c).
  */
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "pqc/common.h"
 #include "pqc/algorithms.h"
 #include "core/sig/sig_internal.h"
+#include "fndsa.h"
+#include "fndsa_params.h"
 
 /* ------------------------------------------------------------------ */
-/* Stub operations                                                      */
+/* FN-DSA-512 wrappers                                                  */
 /* ------------------------------------------------------------------ */
 
-static pqc_status_t fndsa_stub_keygen(uint8_t *pk, uint8_t *sk)
-{ (void)pk; (void)sk; return PQC_ERROR_NOT_SUPPORTED; }
+static pqc_status_t
+fndsa512_keygen(uint8_t *pk, uint8_t *sk)
+{
+    if (fndsa_keygen(pk, FNDSA_512_PK_SIZE,
+                     sk, FNDSA_512_SK_SIZE,
+                     FNDSA_512_LOGN) != 0)
+        return PQC_ERROR_INTERNAL;
+    return PQC_OK;
+}
 
-static pqc_status_t fndsa_stub_sign(uint8_t *sig, size_t *siglen,
-                                     const uint8_t *msg, size_t msglen,
-                                     const uint8_t *sk)
-{ (void)sig; (void)siglen; (void)msg; (void)msglen; (void)sk; return PQC_ERROR_NOT_SUPPORTED; }
+static pqc_status_t
+fndsa512_sign(uint8_t *sig, size_t *siglen,
+              const uint8_t *msg, size_t msglen,
+              const uint8_t *sk)
+{
+    if (fndsa_sign(sig, siglen, FNDSA_512_SIG_MAX_SIZE,
+                   msg, msglen,
+                   sk, FNDSA_512_SK_SIZE,
+                   FNDSA_512_LOGN) != 0)
+        return PQC_ERROR_INTERNAL;
+    return PQC_OK;
+}
 
-static pqc_status_t fndsa_stub_verify(const uint8_t *msg, size_t msglen,
-                                       const uint8_t *sig, size_t siglen,
-                                       const uint8_t *pk)
-{ (void)msg; (void)msglen; (void)sig; (void)siglen; (void)pk; return PQC_ERROR_NOT_SUPPORTED; }
+static pqc_status_t
+fndsa512_verify(const uint8_t *msg, size_t msglen,
+                const uint8_t *sig, size_t siglen,
+                const uint8_t *pk)
+{
+    if (fndsa_verify(msg, msglen,
+                     sig, siglen,
+                     pk, FNDSA_512_PK_SIZE,
+                     FNDSA_512_LOGN) != 0)
+        return PQC_ERROR_VERIFICATION_FAILED;
+    return PQC_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* FN-DSA-1024 wrappers                                                 */
+/* ------------------------------------------------------------------ */
+
+static pqc_status_t
+fndsa1024_keygen(uint8_t *pk, uint8_t *sk)
+{
+    if (fndsa_keygen(pk, FNDSA_1024_PK_SIZE,
+                     sk, FNDSA_1024_SK_SIZE,
+                     FNDSA_1024_LOGN) != 0)
+        return PQC_ERROR_INTERNAL;
+    return PQC_OK;
+}
+
+static pqc_status_t
+fndsa1024_sign(uint8_t *sig, size_t *siglen,
+               const uint8_t *msg, size_t msglen,
+               const uint8_t *sk)
+{
+    if (fndsa_sign(sig, siglen, FNDSA_1024_SIG_MAX_SIZE,
+                   msg, msglen,
+                   sk, FNDSA_1024_SK_SIZE,
+                   FNDSA_1024_LOGN) != 0)
+        return PQC_ERROR_INTERNAL;
+    return PQC_OK;
+}
+
+static pqc_status_t
+fndsa1024_verify(const uint8_t *msg, size_t msglen,
+                 const uint8_t *sig, size_t siglen,
+                 const uint8_t *pk)
+{
+    if (fndsa_verify(msg, msglen,
+                     sig, siglen,
+                     pk, FNDSA_1024_PK_SIZE,
+                     FNDSA_1024_LOGN) != 0)
+        return PQC_ERROR_VERIFICATION_FAILED;
+    return PQC_OK;
+}
 
 /* ------------------------------------------------------------------ */
 /* Vtables                                                              */
@@ -40,12 +110,12 @@ static const pqc_sig_vtable_t fndsa512_vtable = {
     .security_level     = PQC_SECURITY_LEVEL_1,
     .nist_standard      = "FIPS 206",
     .is_stateful        = 0,
-    .public_key_size    = 897,
-    .secret_key_size    = 1281,
-    .max_signature_size = 666,
-    .keygen  = fndsa_stub_keygen,
-    .sign    = fndsa_stub_sign,
-    .verify  = fndsa_stub_verify,
+    .public_key_size    = FNDSA_512_PK_SIZE,
+    .secret_key_size    = FNDSA_512_SK_SIZE,
+    .max_signature_size = FNDSA_512_SIG_MAX_SIZE,
+    .keygen  = fndsa512_keygen,
+    .sign    = fndsa512_sign,
+    .verify  = fndsa512_verify,
     .sign_stateful = NULL,
 };
 
@@ -55,12 +125,12 @@ static const pqc_sig_vtable_t fndsa1024_vtable = {
     .security_level     = PQC_SECURITY_LEVEL_5,
     .nist_standard      = "FIPS 206",
     .is_stateful        = 0,
-    .public_key_size    = 1793,
-    .secret_key_size    = 2305,
-    .max_signature_size = 1280,
-    .keygen  = fndsa_stub_keygen,
-    .sign    = fndsa_stub_sign,
-    .verify  = fndsa_stub_verify,
+    .public_key_size    = FNDSA_1024_PK_SIZE,
+    .secret_key_size    = FNDSA_1024_SK_SIZE,
+    .max_signature_size = FNDSA_1024_SIG_MAX_SIZE,
+    .keygen  = fndsa1024_keygen,
+    .sign    = fndsa1024_sign,
+    .verify  = fndsa1024_verify,
     .sign_stateful = NULL,
 };
 

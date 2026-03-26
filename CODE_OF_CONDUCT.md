@@ -19,7 +19,7 @@ Examples of unacceptable behavior:
 
 ## Enforcement
 
-Instances of abusive behavior may be reported to: **conduct@dyber.com**
+Instances of abusive behavior may be reported to: **conduct@dyber.org**
 
 All complaints will be reviewed and investigated promptly and fairly.
 

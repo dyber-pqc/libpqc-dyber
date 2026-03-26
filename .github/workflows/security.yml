@@ -1,0 +1,262 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+jobs:
+  # ============================================================
+  # Memory Safety Audit
+  # ============================================================
+
+  asan-full:
+    name: AddressSanitizer (Full Suite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ASan
+        env:
+          CC: clang
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+          cmake --build build
+      - name: Run all tests under ASan
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:detect_stack_use_after_return=1:check_initialization_order=1"
+        run: |
+          ./build/tests/test_hash
+          ./build/tests/test_kem_all
+          ./build/tests/test_sig_all
+          ./build/tests/test_integration
+
+  ubsan-full:
+    name: UndefinedBehaviorSanitizer (Full Suite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with UBSan
+        env:
+          CC: clang
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined"
+          cmake --build build
+      - name: Run all tests under UBSan
+        env:
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: |
+          ./build/tests/test_hash
+          ./build/tests/test_kem_all
+          ./build/tests/test_sig_all
+
+  msan-full:
+    name: MemorySanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with MSan
+        env:
+          CC: clang
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=memory"
+          cmake --build build
+      - name: Run tests under MSan
+        run: |
+          ./build/tests/test_hash
+          ./build/tests/test_kem_all
+          ./build/tests/test_sig_all
+
+  # ============================================================
+  # Valgrind Deep Analysis
+  # ============================================================
+
+  valgrind-memcheck:
+    name: Valgrind Memcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
+      - name: Build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="-g -O0"
+          cmake --build build
+      - name: Memcheck hash tests
+        run: |
+          valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
+            --track-origins=yes --error-exitcode=1 \
+            ./build/tests/test_hash
+      - name: Memcheck KEM tests
+        run: |
+          valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
+            --track-origins=yes --error-exitcode=1 \
+            ./build/tests/test_kem_all
+      - name: Memcheck Signature tests
+        run: |
+          valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
+            --track-origins=yes --error-exitcode=1 \
+            ./build/tests/test_sig_all
+
+  valgrind-callgrind:
+    name: Valgrind Callgrind (Performance Profile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
+      - name: Build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-g"
+          cmake --build build
+      - name: Profile KEM
+        run: |
+          valgrind --tool=callgrind --callgrind-out-file=callgrind_kem.out \
+            ./build/tests/bench_kem
+      - name: Profile Signatures
+        run: |
+          valgrind --tool=callgrind --callgrind-out-file=callgrind_sig.out \
+            ./build/tests/bench_sig
+      - name: Upload profiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: callgrind-profiles
+          path: callgrind_*.out
+
+  # ============================================================
+  # Constant-Time Verification
+  # ============================================================
+
+  ct-verification:
+    name: Constant-Time Verification (ctgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
+      - name: Build with CT markers
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1 -g -O1"
+          cmake --build build
+      - name: Verify constant-time KEM operations
+        run: |
+          valgrind --tool=memcheck --error-exitcode=1 \
+            ./build/tests/test_kem_all 2>&1
+      - name: Verify constant-time Signature operations
+        run: |
+          valgrind --tool=memcheck --error-exitcode=1 \
+            ./build/tests/test_sig_all 2>&1
+
+  # ============================================================
+  # Static Analysis
+  # ============================================================
+
+  cppcheck:
+    name: Cppcheck Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+            --inconclusive \
+            --error-exitcode=1 \
+            --suppress=missingInclude \
+            --suppress=unusedFunction \
+            --suppress=unmatchedSuppression \
+            -I include/ -I src/ \
+            src/core/ 2>&1 | tee cppcheck-report.txt
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck-report
+          path: cppcheck-report.txt
+
+  clang-analyzer:
+    name: Clang Static Analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang-tools
+      - name: Run scan-build
+        run: |
+          scan-build -o scan-results/ \
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang
+          scan-build -o scan-results/ --status-bugs \
+            cmake --build build 2>&1 | tee scan-build-report.txt
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-build-results
+          path: scan-results/
+
+  # ============================================================
+  # Compiler Warning Audit
+  # ============================================================
+
+  compiler-warnings:
+    name: Zero Warnings (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with -Werror
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            export CC=clang
+          fi
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-Werror"
+          cmake --build build 2>&1 | tee warnings.log
+      - name: Check for warnings
+        run: |
+          if grep -i "warning:" warnings.log; then
+            echo "Warnings found!"
+            exit 1
+          fi
+
+  # ============================================================
+  # Binary Reproducibility
+  # ============================================================
+
+  reproducible-build:
+    name: Reproducible Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 1
+        run: |
+          cmake -B build1 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build1
+          sha256sum build1/libpqc.a > checksums1.txt
+      - name: Clean and Build 2
+        run: |
+          cmake -B build2 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build2
+          sha256sum build2/libpqc.a > checksums2.txt
+      - name: Compare
+        run: |
+          echo "Build 1:" && cat checksums1.txt
+          echo "Build 2:" && cat checksums2.txt
+          diff checksums1.txt checksums2.txt && echo "Builds are reproducible!"

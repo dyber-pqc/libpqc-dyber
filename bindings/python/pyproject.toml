@@ -33,9 +33,9 @@ classifiers = [
 keywords = ["post-quantum", "cryptography", "kem", "signature", "ml-kem", "ml-dsa"]
 
 [project.urls]
-Homepage = "https://github.com/dyber/libpqc-dyber"
-Documentation = "https://github.com/dyber/libpqc-dyber"
-Repository = "https://github.com/dyber/libpqc-dyber"
+Homepage = "https://github.com/dyber-pqc/libpqc-dyber"
+Documentation = "https://github.com/dyber-pqc/libpqc-dyber"
+Repository = "https://github.com/dyber-pqc/libpqc-dyber"
 
 [tool.setuptools.packages.find]
 where = ["src"]

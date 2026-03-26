@@ -6,11 +6,11 @@ Gem::Specification.new do |spec|
   spec.name          = 'pqc-dyber'
   spec.version       = '1.0.0'
   spec.authors       = ['Dyber, Inc.']
-  spec.email         = ['info@dyber.com']
+  spec.email         = ['info@dyber.org']
 
   spec.summary       = 'Post-Quantum Cryptography library bindings for Ruby'
   spec.description   = 'Ruby FFI bindings for libpqc-dyber, providing ML-KEM, ML-DSA, and other post-quantum algorithms.'
-  spec.homepage      = 'https://github.com/dyber/libpqc-dyber'
+  spec.homepage      = 'https://github.com/dyber-pqc/libpqc-dyber'
   spec.license       = 'Apache-2.0 OR MIT'
 
   spec.required_ruby_version = '>= 2.7.0'

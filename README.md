@@ -1012,7 +1012,7 @@ ML-KEM (FIPS 203) and ML-DSA (FIPS 204) have complete, specification-faithful im
 
 ### How do I report a security vulnerability?
 
-See [SECURITY.md](SECURITY.md). Email security@dyber.com. Do **not** open a public issue.
+See [SECURITY.md](SECURITY.md). Email security@dyber.org. Do **not** open a public issue.
 
 ### What NIST security levels mean?
 
@@ -1088,7 +1088,7 @@ We believe that the transition to post-quantum cryptography should be:
 - **Correct** — implemented from specifications with rigorous validation
 - **Fast** — hardware-accelerated for real-world performance
 
-For enterprise support, FIPS validation assistance, or custom integrations, contact us at **enterprise@dyber.com**.
+For enterprise support, FIPS validation assistance, or custom integrations, contact us at **enterprise@dyber.org**.
 
 ---
 

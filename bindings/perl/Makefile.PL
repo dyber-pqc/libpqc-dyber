@@ -19,8 +19,8 @@ WriteMakefile(
         resources   => {
             repository => {
                 type => 'git',
-                url  => 'https://github.com/dyber/libpqc-dyber.git',
-                web  => 'https://github.com/dyber/libpqc-dyber',
+                url  => 'https://github.com/dyber-pqc/libpqc-dyber.git',
+                web  => 'https://github.com/dyber-pqc/libpqc-dyber',
             },
         },
     },

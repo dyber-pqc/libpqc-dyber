@@ -46,7 +46,7 @@ publishing {
             pom {
                 name.set("libpqc-dyber Kotlin Bindings")
                 description.set("Kotlin wrapper for libpqc-dyber post-quantum cryptography library")
-                url.set("https://github.com/dyber/libpqc-dyber")
+                url.set("https://github.com/dyber-pqc/libpqc-dyber")
                 licenses {
                     license {
                         name.set("Apache-2.0 OR MIT")

@@ -19,7 +19,7 @@
   "license": "(Apache-2.0 OR MIT)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dyber/libpqc-dyber"
+    "url": "https://github.com/dyber-pqc/libpqc-dyber"
   },
   "peerDependencies": {
     "@dyber/pqc": "^1.0.0"
