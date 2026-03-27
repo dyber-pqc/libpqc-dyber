@@ -41,6 +41,12 @@ target_link_libraries(test_integration PRIVATE pqc_static)
 target_include_directories(test_integration PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_integration COMMAND test_integration)
 
+# Quick FN-DSA test (for development/debugging)
+add_executable(test_fndsa_quick unit/test_fndsa_quick.c)
+target_link_libraries(test_fndsa_quick PRIVATE pqc_static)
+target_include_directories(test_fndsa_quick PRIVATE ${PQC_INCLUDE_DIRS})
+add_test(NAME test_fndsa_quick COMMAND test_fndsa_quick)
+
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)
     # Common include path for bench_common.h

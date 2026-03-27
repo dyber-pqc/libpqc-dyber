@@ -47,51 +47,68 @@ void hqc_vect_add(uint64_t *o, const uint64_t *a, const uint64_t *b,
 }
 
 /*
- * Sparse polynomial multiplication: o = a * b mod (X^n - 1).
- * Uses schoolbook multiplication on the dense representation.
+ * Polynomial multiplication: o = a * b mod (X^n - 1).
+ * Uses schoolbook multiplication on the dense representation,
+ * then word-based reduction modulo (X^n - 1).
  */
 void hqc_vect_mul(uint64_t *o, const uint64_t *a, const uint64_t *b,
                   uint32_t n)
 {
     uint32_t n_words = (n + 63) / 64;
-    uint64_t result[HQC_VEC_N_WORDS * 2];
+    /* Product can have up to 2n-1 bits, so need (2n-1+63)/64 + 1 words */
+    uint32_t result_words = n_words * 2 + 1;
+    uint64_t result[HQC_VEC_N_WORDS * 2 + 2];
 
-    memset(result, 0, sizeof(result));
+    memset(result, 0, result_words * sizeof(uint64_t));
 
-    /* Schoolbook multiplication bit-by-bit: for each set bit in b,
-     * shift a and XOR into result */
+    /* Schoolbook multiplication: for each set bit in b,
+     * XOR the shifted copy of a into result */
     for (uint32_t i = 0; i < n; i++) {
-        /* Check if bit i of b is set */
-        if ((b[i / 64] >> (i % 64)) & 1) {
-            /* XOR shifted-a into result, starting at position i */
-            uint32_t word_offset = i / 64;
-            uint32_t bit_offset  = i % 64;
+        if (!((b[i / 64] >> (i % 64)) & 1)) continue;
 
-            if (bit_offset == 0) {
-                for (uint32_t j = 0; j < n_words; j++) {
-                    result[word_offset + j] ^= a[j];
-                }
-            } else {
-                for (uint32_t j = 0; j < n_words; j++) {
-                    result[word_offset + j]     ^= a[j] << bit_offset;
-                    result[word_offset + j + 1]  ^= a[j] >> (64 - bit_offset);
-                }
+        uint32_t word_offset = i / 64;
+        uint32_t bit_offset  = i % 64;
+
+        if (bit_offset == 0) {
+            for (uint32_t j = 0; j < n_words; j++) {
+                result[word_offset + j] ^= a[j];
+            }
+        } else {
+            for (uint32_t j = 0; j < n_words; j++) {
+                result[word_offset + j]     ^= a[j] << bit_offset;
+                result[word_offset + j + 1] ^= a[j] >> (64 - bit_offset);
             }
         }
     }
 
-    /* Reduce modulo X^n - 1: fold result[n..2n-1] back */
-    uint32_t total_words = (2 * n + 63) / 64;
-    for (uint32_t i = n; i < 2 * n && (i / 64) < total_words; i++) {
-        if ((result[i / 64] >> (i % 64)) & 1) {
-            uint32_t ri = i - n;
-            result[ri / 64] ^= (uint64_t)1 << (ri % 64);
-            result[i / 64]  ^= (uint64_t)1 << (i % 64);
+    /*
+     * Reduce modulo (X^n - 1) using word-level operations.
+     * For each bit at position p >= n in result, it wraps to position p - n.
+     * We shift the upper portion (bits n..2n-2) and XOR it into the lower.
+     */
+    {
+        uint32_t bit_off = n % 64;
+        uint32_t word_off = n / 64;
+
+        if (bit_off == 0) {
+            /* n is a multiple of 64: just XOR upper words into lower */
+            for (uint32_t j = 0; j < n_words; j++) {
+                result[j] ^= result[word_off + j];
+            }
+        } else {
+            /* General case: the upper bits start at bit_off within word word_off */
+            for (uint32_t j = 0; j < n_words; j++) {
+                uint64_t hi = result[word_off + j] >> bit_off;
+                if (word_off + j + 1 < result_words) {
+                    hi |= result[word_off + j + 1] << (64 - bit_off);
+                }
+                result[j] ^= hi;
+            }
         }
     }
 
     memcpy(o, result, n_words * sizeof(uint64_t));
-    /* Clear trailing bits */
+    /* Clear trailing bits above n */
     uint32_t rem = n % 64;
     if (rem) {
         o[n_words - 1] &= ((uint64_t)1 << rem) - 1;

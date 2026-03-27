@@ -197,7 +197,9 @@ int bike_gf2x_inv(uint64_t *o, const uint64_t *a, uint32_t r)
      * Computes o such that a * o = 1 mod (x^r - 1).
      */
     uint32_t r_words = (r + 63) / 64;
-    uint32_t alloc_words = r_words + 2; /* extra space for shifts */
+    /* Bezout coefficients can have degree up to 2r during intermediate steps,
+     * so allocate enough space for shifted products g2 * x^shift. */
+    uint32_t alloc_words = r_words * 2 + 4;
 
     uint64_t *u  = (uint64_t *)calloc(alloc_words, sizeof(uint64_t));
     uint64_t *v  = (uint64_t *)calloc(alloc_words, sizeof(uint64_t));

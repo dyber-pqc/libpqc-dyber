@@ -143,8 +143,8 @@ static const slhdsa_params_t SLHDSA_SHA2_192F = {
     .wots_sig_bytes = 1224,
     .pk_bytes = 48, .sk_bytes = 96,
     .sig_bytes = 35664,
-    .fors_sig_bytes = 6336,     /* 33*(8+1)*24 */
-    .ht_sig_bytes = 29328,      /* 22*(3*24 + 1224) */
+    .fors_sig_bytes = 7128,     /* 33*(8+1)*24 */
+    .ht_sig_bytes = 28512,      /* 22*(3*24 + 1224) */
 };
 
 static const slhdsa_params_t SLHDSA_SHA2_256S = {
@@ -223,8 +223,8 @@ static const slhdsa_params_t SLHDSA_SHAKE_192F = {
     .wots_sig_bytes = 1224,
     .pk_bytes = 48, .sk_bytes = 96,
     .sig_bytes = 35664,
-    .fors_sig_bytes = 6336,
-    .ht_sig_bytes = 29328,
+    .fors_sig_bytes = 7128,
+    .ht_sig_bytes = 28512,
 };
 
 static const slhdsa_params_t SLHDSA_SHAKE_256S = {

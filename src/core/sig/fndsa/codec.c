@@ -244,14 +244,12 @@ fndsa_trim_i8_encode(uint8_t *out, size_t max_out,
             mag = (uint32_t)v;
         }
 
-        /* Encode: (bits-1) magnitude bits, then sign bit. */
+        /* Encode: (bits-1) magnitude bits, then sign bit.
+         * Always write exactly `bits` bits per element so that the
+         * encoded length is fixed (n * bits) and the decoder can
+         * compute byte boundaries without knowing the data. */
         bw_write_bits(&bw, mag, bits - 1);
-        if (v != 0)
-            bw_write_bits(&bw, sign, 1);
-        /* If v == 0, no sign bit needed (Falcon convention). */
-        /* Actually in Falcon, zero still gets bits total bits. Let's always
-         * write exactly `bits` bits per element for simplicity and
-         * constant-time behavior. */
+        bw_write_bits(&bw, sign, 1);
     }
 
     return bw_finish(&bw);
@@ -274,15 +272,7 @@ fndsa_trim_i8_decode(int8_t *vals, size_t count, unsigned bits,
         if (br.overflow)
             return -1;
 
-        if (mag == 0) {
-            vals[i] = 0;
-            /* Still consume sign bit position to keep alignment. */
-            /* In the Falcon encoding, zero values don't have a sign bit
-             * in some variants.  For simplicity, we skip the sign bit
-             * for zero. */
-            continue;
-        }
-
+        /* Always read the sign bit (matches the fixed-width encoder). */
         sign = br_read_bits(&br, 1);
         if (br.overflow)
             return -1;
@@ -370,6 +360,7 @@ fndsa_sk_encode(uint8_t *out, size_t max_out,
 {
     size_t n = (size_t)1 << logn;
     unsigned sk_bits = (logn <= 9) ? FNDSA_512_SK_BITS : FNDSA_1024_SK_BITS;
+    unsigned sk_f_bits = (logn <= 9) ? FNDSA_512_SK_F_BITS : FNDSA_1024_SK_F_BITS;
     size_t pos;
     size_t wrote;
 
@@ -387,7 +378,7 @@ fndsa_sk_encode(uint8_t *out, size_t max_out,
     if (wrote == 0) return 0;
     pos += wrote;
 
-    wrote = fndsa_trim_i8_encode(out + pos, max_out - pos, F, n, sk_bits + 4);
+    wrote = fndsa_trim_i8_encode(out + pos, max_out - pos, F, n, sk_f_bits);
     if (wrote == 0) return 0;
     pos += wrote;
 
@@ -401,6 +392,7 @@ fndsa_sk_decode(int8_t *f, int8_t *g, int8_t *F,
 {
     size_t n = (size_t)1 << logn;
     unsigned sk_bits = (logn <= 9) ? FNDSA_512_SK_BITS : FNDSA_1024_SK_BITS;
+    unsigned sk_f_bits = (logn <= 9) ? FNDSA_512_SK_F_BITS : FNDSA_1024_SK_F_BITS;
     size_t pos;
 
     if (sklen < 1)
@@ -410,11 +402,11 @@ fndsa_sk_decode(int8_t *f, int8_t *g, int8_t *F,
 
     pos = 1;
 
-    /* Estimate sizes for each section. */
+    /* Compute sizes for each section. */
     {
         size_t f_bytes = (n * sk_bits + 7) / 8;
         size_t g_bytes = (n * sk_bits + 7) / 8;
-        size_t F_bytes = (n * (sk_bits + 4) + 7) / 8;
+        size_t F_bytes = (n * sk_f_bits + 7) / 8;
 
         if (pos + f_bytes + g_bytes + F_bytes > sklen)
             return -1;
@@ -427,7 +419,7 @@ fndsa_sk_decode(int8_t *f, int8_t *g, int8_t *F,
             return -1;
         pos += g_bytes;
 
-        if (fndsa_trim_i8_decode(F, n, sk_bits + 4, sk + pos, F_bytes) != 0)
+        if (fndsa_trim_i8_decode(F, n, sk_f_bits, sk + pos, F_bytes) != 0)
             return -1;
     }
 
