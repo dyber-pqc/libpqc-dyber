@@ -138,7 +138,8 @@ static pqc_status_t mceliece_keygen_impl(uint8_t *pk, uint8_t *sk,
 
     gf_init_tables(p->m);
 
-    perm = (uint16_t *)calloc((size_t)p->n, sizeof(uint16_t));
+    /* Permutation needs field_size entries (2^m), which may be > n */
+    perm = (uint16_t *)calloc((size_t)p->field_size, sizeof(uint16_t));
     if (!perm)
         return PQC_ERROR_ALLOC;
 

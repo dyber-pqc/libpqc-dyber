@@ -123,7 +123,27 @@
       "Bash(for func:*)",
       "Bash(do echo:*)",
       "Bash(grep -l 'int $func' H:libpqc-dyber/src/core/sig/*.c)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(wsl --list --verbose)",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && which gcc && gcc --version | head -1 && which cmake && cmake --version | head -1\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && rm -rf build-wsl && cmake -B build-wsl -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=OFF 2>&1 | tail -5 && cmake --build build-wsl -j4 2>&1 | grep -E ''error:|Error|fatal'' | head -20\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && rm -rf build-wsl && cmake -B build-wsl -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=OFF 2>&1 | tail -2 && cmake --build build-wsl -j4 2>&1 | grep -E ''error:|Error|fatal'' | head -20\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 90 ./build-wsl/tests/test_kem 2>&1 | grep -E ''PASS|FAIL'' | grep -v Pipeline\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 60 ./build-wsl/tests/test_kem 2>&1\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 30 ./build-wsl/tests/test_sig 2>&1 | head -10\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 30 ./build-wsl/tests/test_sig 2>&1\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && cmake --build build-asan -j4 2>&1 | grep -E ''error|Error'' | head -10\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && grep PQC_BUILD_BENCHMARKS build-asan/CMakeCache.txt | head -3\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ASAN_OPTIONS=''detect_leaks=0'' timeout 30 ./build-asan/tests/test_kem 2>&1 | head -40\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ls -la build-asan/tests/test_kem 2>/dev/null && ASAN_OPTIONS=''detect_leaks=0'' ./build-asan/tests/test_kem 2>&1 | head -20\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ls build-asan/tests/test_kem 2>&1\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ASAN_OPTIONS=''detect_leaks=0'' timeout 10 ./build-asan/tests/test_hash 2>&1\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ASAN_OPTIONS=''detect_leaks=0'' timeout 30 ./build-wsl/tests/test_kem 2>&1 | head -10\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 60 ./build-wsl/tests/test_kem 2>&1 | head -15\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ASAN_OPTIONS=detect_leaks=0 ./build-asan/tests/test_kem\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && rm -rf build-wsl && cmake -B build-wsl -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=OFF 2>&1 | tail -1 && cmake --build build-wsl -j4 2>&1 | tail -1 && timeout 60 ./build-wsl/tests/test_kem 2>&1 | head -15\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 120 ./build-wsl/tests/test_kem 2>&1 | grep -E ''PASS|FAIL''\")",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 120 ./build-wsl/tests/test_kem 2>&1\")"
     ]
   }
 }

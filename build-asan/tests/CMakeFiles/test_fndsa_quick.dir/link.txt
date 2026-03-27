@@ -1,0 +1,1 @@
+/usr/bin/gcc -fsanitize=address -fno-omit-frame-pointer -g -g -fsanitize=address -Wl,-z,relro,-z,now CMakeFiles/test_fndsa_quick.dir/unit/test_fndsa_quick.c.o -o test_fndsa_quick  ../libpqc.a -lm 

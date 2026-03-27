@@ -1,0 +1,1 @@
+/usr/bin/cc -g -Wl,-z,relro,-z,now CMakeFiles/test_kem.dir/unit/test_kem_all.c.o -o test_kem  ../libpqc.a -lm 
