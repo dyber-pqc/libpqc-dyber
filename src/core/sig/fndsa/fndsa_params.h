@@ -38,8 +38,10 @@
 /* Squared norm bound for (s1, s2): floor(1.8205^2 * 2 * 512 * q). */
 #define FNDSA_512_SIG_BOUND     34034726
 
-/* Number of bits per coefficient in trim_i8 encoding. */
-#define FNDSA_512_SK_BITS       4
+/* Number of bits per coefficient in trim_i8 encoding for f, g. */
+#define FNDSA_512_SK_BITS       6
+/* Number of bits per coefficient in trim_i8 encoding for F. */
+#define FNDSA_512_SK_F_BITS     8
 
 /* ------------------------------------------------------------------ */
 /* FN-DSA-1024 (logn = 10, n = 1024)                                    */
@@ -58,7 +60,10 @@
 /* Squared norm bound for (s1, s2). */
 #define FNDSA_1024_SIG_BOUND    70265242
 
-#define FNDSA_1024_SK_BITS      4
+/* Number of bits per coefficient in trim_i8 encoding for f, g. */
+#define FNDSA_1024_SK_BITS      5
+/* Number of bits per coefficient in trim_i8 encoding for F. */
+#define FNDSA_1024_SK_F_BITS    8
 
 /* ------------------------------------------------------------------ */
 /* Derived helper macros                                                */

@@ -33,9 +33,9 @@
 
 #define BIKE_L1_R_BYTES   ((BIKE_L1_R + 7) / 8)
 #define BIKE_L1_R_WORDS   ((BIKE_L1_R + 63) / 64)
-#define BIKE_L1_PK_BYTES  1541   /* ceil(r/8) + overhead */
-#define BIKE_L1_SK_BYTES  3749
-#define BIKE_L1_CT_BYTES  1573
+#define BIKE_L1_PK_BYTES  BIKE_L1_R_BYTES
+#define BIKE_L1_SK_BYTES  (BIKE_SEED_BYTES + 2 * BIKE_L1_R_BYTES + BIKE_SHARED_SECRET_BYTES)
+#define BIKE_L1_CT_BYTES  (BIKE_L1_R_BYTES + BIKE_SHARED_SECRET_BYTES)
 
 /* ------------------------------------------------------------------ */
 /* BIKE-L3 parameters (NIST Level 3)                                    */
@@ -48,9 +48,9 @@
 
 #define BIKE_L3_R_BYTES   ((BIKE_L3_R + 7) / 8)
 #define BIKE_L3_R_WORDS   ((BIKE_L3_R + 63) / 64)
-#define BIKE_L3_PK_BYTES  3083
-#define BIKE_L3_SK_BYTES  7467
-#define BIKE_L3_CT_BYTES  3115
+#define BIKE_L3_PK_BYTES  BIKE_L3_R_BYTES
+#define BIKE_L3_SK_BYTES  (BIKE_SEED_BYTES + 2 * BIKE_L3_R_BYTES + BIKE_SHARED_SECRET_BYTES)
+#define BIKE_L3_CT_BYTES  (BIKE_L3_R_BYTES + BIKE_SHARED_SECRET_BYTES)
 
 /* ------------------------------------------------------------------ */
 /* BIKE-L5 parameters (NIST Level 5)                                    */
@@ -63,9 +63,9 @@
 
 #define BIKE_L5_R_BYTES   ((BIKE_L5_R + 7) / 8)
 #define BIKE_L5_R_WORDS   ((BIKE_L5_R + 63) / 64)
-#define BIKE_L5_PK_BYTES  5122
-#define BIKE_L5_SK_BYTES  12415
-#define BIKE_L5_CT_BYTES  5154
+#define BIKE_L5_PK_BYTES  BIKE_L5_R_BYTES
+#define BIKE_L5_SK_BYTES  (BIKE_SEED_BYTES + 2 * BIKE_L5_R_BYTES + BIKE_SHARED_SECRET_BYTES)
+#define BIKE_L5_CT_BYTES  (BIKE_L5_R_BYTES + BIKE_SHARED_SECRET_BYTES)
 
 /* ------------------------------------------------------------------ */
 /* Maximum parameter sizes                                              */
@@ -76,9 +76,9 @@
 #define BIKE_MAX_R_WORDS   BIKE_L5_R_WORDS
 #define BIKE_MAX_W         BIKE_L5_W
 #define BIKE_MAX_T         BIKE_L5_T
-#define BIKE_MAX_PK_BYTES  BIKE_L5_PK_BYTES
-#define BIKE_MAX_SK_BYTES  BIKE_L5_SK_BYTES
-#define BIKE_MAX_CT_BYTES  BIKE_L5_CT_BYTES
+#define BIKE_MAX_PK_BYTES   BIKE_L5_PK_BYTES
+#define BIKE_MAX_SK_BYTES   BIKE_L5_SK_BYTES
+#define BIKE_MAX_CT_BYTES   BIKE_L5_CT_BYTES
 
 /* ------------------------------------------------------------------ */
 /* Runtime parameter structure                                          */

@@ -57,7 +57,6 @@ void hqc_rs_encode(uint8_t *codeword, const uint8_t *message,
 
     hqc_gf_t gen[RS_MAX_G + 1];
     hqc_gf_t parity[RS_MAX_G];
-    hqc_gf_t msg[RS_MAX_N1];
 
     /* Initialize GF tables */
     hqc_gf_generate_tables(m);
@@ -65,29 +64,42 @@ void hqc_rs_encode(uint8_t *codeword, const uint8_t *message,
     /* Compute generator polynomial */
     rs_compute_generator(gen, g_deg, m);
 
-    /* Convert message bytes to GF elements */
-    memset(msg, 0, sizeof(msg));
-    for (uint32_t i = 0; i < k; i++) {
-        msg[i] = (hqc_gf_t)message[i];
-    }
+    /*
+     * Systematic RS encoding with the polynomial convention that
+     * codeword[j] is the coefficient of x^j.
+     *
+     * We place the message at the high-degree positions:
+     *   c(x) = m(x) * x^g - r(x)
+     * where m(x) = message[0]*x^0 + ... + message[k-1]*x^{k-1}
+     * and r(x) = (m(x) * x^g) mod g(x).
+     *
+     * The codeword layout is: [parity (g bytes) | message (k bytes)]
+     *   codeword[0..g-1]   = parity (low degree)
+     *   codeword[g..n1-1]  = message (high degree)
+     *
+     * This ensures c(alpha^i) = 0 for i = 1..2*delta.
+     */
 
-    /* Compute parity: msg(x) * x^g mod g(x) using synthetic division */
+    /* Compute parity = m(x)*x^g mod g(x) using polynomial long division.
+     * We process message coefficients from highest degree down:
+     * m[k-1]*x^{k-1+g}, m[k-2]*x^{k-2+g}, ..., m[0]*x^{g}
+     */
     memset(parity, 0, sizeof(parity));
-    for (uint32_t i = 0; i < k; i++) {
-        hqc_gf_t feedback = msg[i] ^ parity[g_deg - 1];
+    for (int i = (int)k - 1; i >= 0; i--) {
+        hqc_gf_t feedback = (hqc_gf_t)message[i] ^ parity[g_deg - 1];
         for (int j = (int)g_deg - 1; j > 0; j--) {
             parity[j] = parity[j - 1] ^ hqc_gf_mul(gen[j], feedback, m);
         }
         parity[0] = hqc_gf_mul(gen[0], feedback, m);
     }
 
-    /* Assemble codeword: [message | parity] */
+    /* Assemble codeword: [parity | message] */
     memset(codeword, 0, n1);
-    for (uint32_t i = 0; i < k; i++) {
-        codeword[i] = message[i];
-    }
     for (uint32_t i = 0; i < g_deg; i++) {
-        codeword[k + i] = (uint8_t)parity[i];
+        codeword[i] = (uint8_t)parity[i];
+    }
+    for (uint32_t i = 0; i < k; i++) {
+        codeword[g_deg + i] = message[i];
     }
 }
 
@@ -147,8 +159,6 @@ static uint32_t rs_berlekamp_massey(hqc_gf_t *sigma, const hqc_gf_t *syndromes,
             b++;
         } else {
             memcpy(T, C, sizeof(T));
-            hqc_gf_t d_inv_prev = hqc_gf_inv(d, m); /* we need d * B, shift */
-            (void)d_inv_prev;
 
             /* C(x) = C(x) - d * x^b * B(x) */
             for (uint32_t i = 0; i + (uint32_t)b <= g_deg; i++) {
@@ -246,7 +256,6 @@ static void rs_forney(hqc_gf_t *error_values, const uint32_t *error_pos,
      */
     for (uint32_t k = 0; k < num_errors; k++) {
         uint32_t pos = error_pos[k];
-        hqc_gf_t x_k = hqc_gf_exp(pos, m);
         hqc_gf_t x_inv = hqc_gf_exp(ord - (pos % ord), m);
 
         /* Evaluate omega at x_inv */
@@ -274,9 +283,12 @@ static void rs_forney(hqc_gf_t *error_values, const uint32_t *error_pos,
         }
 
         if (sigma_deriv != 0) {
-            /* e_k = X_k * omega(X_k^{-1}) / sigma'(X_k^{-1}) */
-            hqc_gf_t num = hqc_gf_mul(x_k, omega_val, m);
-            error_values[k] = hqc_gf_mul(num, hqc_gf_inv(sigma_deriv, m), m);
+            /*
+             * Forney formula: e_k = X_k^{1-c} * omega(X_k^{-1}) / sigma'(X_k^{-1})
+             * With c = 1 (first root is alpha^1), X_k^{1-c} = X_k^0 = 1.
+             * So e_k = omega(X_k^{-1}) / sigma'(X_k^{-1})
+             */
+            error_values[k] = hqc_gf_mul(omega_val, hqc_gf_inv(sigma_deriv, m), m);
         } else {
             error_values[k] = 0;
         }
@@ -322,7 +334,8 @@ int hqc_rs_decode(uint8_t *message, const uint8_t *codeword,
     }
 
     if (all_zero) {
-        memcpy(message, codeword, k);
+        /* Message is at positions g_deg .. n1-1 */
+        memcpy(message, codeword + g_deg, k);
         return 0;
     }
 
@@ -331,7 +344,7 @@ int hqc_rs_decode(uint8_t *message, const uint8_t *codeword,
 
     if (num_errors > delta) {
         /* Too many errors */
-        memcpy(message, codeword, k);
+        memcpy(message, codeword + g_deg, k);
         return -1;
     }
 
@@ -340,7 +353,7 @@ int hqc_rs_decode(uint8_t *message, const uint8_t *codeword,
 
     if (found != num_errors) {
         /* Could not find all error positions */
-        memcpy(message, codeword, k);
+        memcpy(message, codeword + g_deg, k);
         return -1;
     }
 
@@ -354,7 +367,7 @@ int hqc_rs_decode(uint8_t *message, const uint8_t *codeword,
         }
     }
 
-    /* Extract message */
-    memcpy(message, received, k);
+    /* Extract message from high-degree positions (g_deg .. n1-1) */
+    memcpy(message, received + g_deg, k);
     return 0;
 }
