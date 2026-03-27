@@ -117,7 +117,9 @@
       "Bash(script -q -c 'timeout 300 \"\"\"\"H:/libpqc-dyber/build/tests/Debug/test_kem.exe\"\"\"\"' /tmp/kem_script.txt)",
       "Bash(\"$CMAKE\" --build build --config Release --target pqc_static)",
       "Bash(gh run:*)",
-      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(f''''{r[id]} {r[name]} {r[conclusion]}''''\\) for r in d.get\\(''''workflow_runs'''',[]\\)]\")"
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(f''''{r[id]} {r[name]} {r[conclusion]}''''\\) for r in d.get\\(''''workflow_runs'''',[]\\)]\")",
+      "WebFetch(domain:github.com)",
+      "Bash(cmake -B build_check -G \"Visual Studio 17 2022\" -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON)"
     ]
   }
 }
