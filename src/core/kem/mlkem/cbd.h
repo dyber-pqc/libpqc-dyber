@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Centered Binomial Distribution sampling for ML-KEM (FIPS 203).
+ *
+ * Based on the reference implementation from pq-crystals/kyber.
  */
 
 #ifndef PQC_MLKEM_CBD_H
@@ -18,21 +20,25 @@ extern "C" {
 #endif
 
 /**
+ * Sample polynomial from CBD with eta=2.
+ * buf must be at least 2*N/4 = 128 bytes.
+ */
+void pqc_mlkem_cbd2(pqc_mlkem_poly *r, const uint8_t buf[128]);
+
+/**
+ * Sample polynomial from CBD with eta=3.
+ * buf must be at least 3*N/4 = 192 bytes.
+ */
+void pqc_mlkem_cbd3(pqc_mlkem_poly *r, const uint8_t buf[192]);
+
+/**
  * Sample a polynomial from the centered binomial distribution CBD_eta.
  *
  * @param r    Output polynomial.
- * @param buf  Input buffer of 64 * eta bytes of pseudorandom data.
+ * @param buf  Input buffer of eta * N/4 bytes of pseudorandom data.
  * @param eta  Distribution parameter (2 or 3).
  */
 void pqc_mlkem_cbd_eta(pqc_mlkem_poly *r, const uint8_t *buf, unsigned int eta);
-
-/** CBD_2: sample from centered binomial distribution with eta=2.
- *  buf must be at least 128 bytes (= 64*2). */
-void pqc_mlkem_cbd2(pqc_mlkem_poly *r, const uint8_t buf[128]);
-
-/** CBD_3: sample from centered binomial distribution with eta=3.
- *  buf must be at least 192 bytes (= 64*3). */
-void pqc_mlkem_cbd3(pqc_mlkem_poly *r, const uint8_t buf[192]);
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,8 @@
  *   H  = SHA3-256
  *   G  = SHA3-512
  *   J  = SHAKE-256
+ *
+ * Based on the reference implementation from pq-crystals/kyber (kem.c).
  */
 
 #include <string.h>
@@ -95,52 +97,41 @@ const pqc_mlkem_params_t PQC_MLKEM_1024 = {
 /* ================================================================= */
 
 /*
- * Input: d (32 bytes) - seed for K-PKE key generation
- *        z (32 bytes) - implicit-rejection seed
- * Output: ek (public key), dk (secret key)
- *
- * Secret key layout:
- *   [0 .. indcpa_sk_bytes)            : K-PKE secret key (s in NTT form)
- *   [indcpa_sk_bytes .. +indcpa_pk)   : K-PKE public key (for re-encryption)
- *   [.. +32)                          : H(pk)
- *   [.. +32)                          : z (implicit rejection seed)
+ * Following the reference kem.c crypto_kem_keypair logic:
+ *   1. Generate 2*SYMBYTES random coins
+ *   2. indcpa_keypair_derand(pk, sk, coins)
+ *   3. sk = sk_pke || pk || H(pk) || z
  */
 pqc_status_t pqc_mlkem_keygen(const pqc_mlkem_params_t *params,
                                uint8_t *pk,
                                uint8_t *sk)
 {
-    uint8_t d_z[2 * PQC_MLKEM_SYMBYTES]; /* d || z */
+    uint8_t coins[2 * PQC_MLKEM_SYMBYTES];
     pqc_status_t rc;
 
     if (!params || !pk || !sk) {
         return PQC_ERROR_INVALID_ARGUMENT;
     }
 
-    /* Step 1: Generate random seeds d and z */
-    rc = pqc_randombytes(d_z, 2 * PQC_MLKEM_SYMBYTES);
+    /* Generate random coins: first SYMBYTES = d, second SYMBYTES = z */
+    rc = pqc_randombytes(coins, 2 * PQC_MLKEM_SYMBYTES);
     if (rc != PQC_OK) {
         return PQC_ERROR_RNG_FAILED;
     }
 
-    /* Step 2: Pass d to K-PKE.KeyGen via the pk buffer (convention) */
-    memcpy(pk, d_z, PQC_MLKEM_SYMBYTES);
-    pqc_mlkem_indcpa_keygen(pk, sk, params);
+    /* IND-CPA key generation from first 32 bytes of coins */
+    pqc_mlkem_indcpa_keypair_derand(pk, sk, coins, params);
 
-    /* Step 3: Assemble full secret key:
-     *   sk = sk_pke || pk || H(pk) || z
-     */
-
-    /* Copy pk into sk after the IND-CPA secret key */
-    memcpy(sk + params->indcpa_sk_bytes, pk, params->indcpa_pk_bytes);
+    /* Assemble full secret key: sk = sk_pke || pk || H(pk) || z */
+    memcpy(sk + params->indcpa_sk_bytes, pk, params->pk_bytes);
 
     /* H(pk) */
-    pqc_sha3_256(sk + params->indcpa_sk_bytes + params->indcpa_pk_bytes,
-                  pk, params->indcpa_pk_bytes);
+    pqc_sha3_256(sk + params->sk_bytes - 2 * PQC_MLKEM_SYMBYTES,
+                  pk, params->pk_bytes);
 
-    /* z (implicit rejection seed) */
-    memcpy(sk + params->indcpa_sk_bytes + params->indcpa_pk_bytes + PQC_MLKEM_SYMBYTES,
-           d_z + PQC_MLKEM_SYMBYTES,
-           PQC_MLKEM_SYMBYTES);
+    /* z (value for pseudo-random output on reject) */
+    memcpy(sk + params->sk_bytes - PQC_MLKEM_SYMBYTES,
+           coins + PQC_MLKEM_SYMBYTES, PQC_MLKEM_SYMBYTES);
 
     return PQC_OK;
 }
@@ -150,49 +141,45 @@ pqc_status_t pqc_mlkem_keygen(const pqc_mlkem_params_t *params,
 /* ================================================================= */
 
 /*
- * Input: ek (public key)
- * Output: (K, c)  where K is shared secret, c is ciphertext
- *
- * Steps:
- *   1. m <-$ {0,1}^256  (random 32 bytes)
- *   2. (K, r) = G(m || H(ek))
- *   3. c = K-PKE.Encrypt(ek, m, r)
- *   4. return (K, c)
+ * Following the reference kem.c crypto_kem_enc logic:
+ *   1. Generate random m
+ *   2. H(pk) -> buf+SYMBYTES (multitarget countermeasure)
+ *   3. G(m || H(pk)) -> (K, r)
+ *   4. indcpa_enc(ct, m, pk, r)
+ *   5. return K
  */
 pqc_status_t pqc_mlkem_encaps(const pqc_mlkem_params_t *params,
                                uint8_t *ct,
                                uint8_t *ss,
                                const uint8_t *pk)
 {
-    uint8_t m[PQC_MLKEM_SYMBYTES];
-    uint8_t h_pk[PQC_MLKEM_SYMBYTES];
-    uint8_t g_input[2 * PQC_MLKEM_SYMBYTES];
-    uint8_t g_output[2 * PQC_MLKEM_SYMBYTES]; /* (K, r) */
+    uint8_t coins[PQC_MLKEM_SYMBYTES];
+    uint8_t buf[2 * PQC_MLKEM_SYMBYTES];
+    uint8_t kr[2 * PQC_MLKEM_SYMBYTES]; /* will contain key, coins */
     pqc_status_t rc;
 
     if (!params || !ct || !ss || !pk) {
         return PQC_ERROR_INVALID_ARGUMENT;
     }
 
-    /* Step 1: m <-$ B^32 */
-    rc = pqc_randombytes(m, PQC_MLKEM_SYMBYTES);
+    /* Generate random m */
+    rc = pqc_randombytes(coins, PQC_MLKEM_SYMBYTES);
     if (rc != PQC_OK) {
         return PQC_ERROR_RNG_FAILED;
     }
 
-    /* Step 2: H(pk) */
-    pqc_sha3_256(h_pk, pk, params->pk_bytes);
+    memcpy(buf, coins, PQC_MLKEM_SYMBYTES);
 
-    /* Step 3: (K, r) = G(m || H(pk)) */
-    memcpy(g_input, m, PQC_MLKEM_SYMBYTES);
-    memcpy(g_input + PQC_MLKEM_SYMBYTES, h_pk, PQC_MLKEM_SYMBYTES);
-    pqc_sha3_512(g_output, g_input, 2 * PQC_MLKEM_SYMBYTES);
+    /* Multitarget countermeasure for coins + contributory KEM */
+    pqc_sha3_256(buf + PQC_MLKEM_SYMBYTES, pk, params->pk_bytes);
 
-    /* Step 4: c = K-PKE.Encrypt(pk, m, r) */
-    pqc_mlkem_indcpa_enc(ct, m, pk, g_output + PQC_MLKEM_SYMBYTES, params);
+    /* (K, r) = G(m || H(pk)) */
+    pqc_sha3_512(kr, buf, 2 * PQC_MLKEM_SYMBYTES);
 
-    /* Step 5: Output shared secret K */
-    memcpy(ss, g_output, PQC_MLKEM_SYMBYTES);
+    /* coins are in kr+SYMBYTES */
+    pqc_mlkem_indcpa_enc(ct, buf, pk, kr + PQC_MLKEM_SYMBYTES, params);
+
+    memcpy(ss, kr, PQC_MLKEM_SYMBYTES);
 
     return PQC_OK;
 }
@@ -202,64 +189,61 @@ pqc_status_t pqc_mlkem_encaps(const pqc_mlkem_params_t *params,
 /* ================================================================= */
 
 /*
- * Input: dk (secret key), c (ciphertext)
- * Output: K (shared secret)
- *
- * Fujisaki-Okamoto transform with implicit rejection:
- *   1. m' = K-PKE.Decrypt(sk_pke, c)
- *   2. (K', r') = G(m' || h)      where h = H(pk) stored in dk
- *   3. K_bar = J(z || c)           implicit rejection value
- *   4. c' = K-PKE.Encrypt(pk, m', r')
- *   5. if c == c' then K = K'  else K = K_bar    (constant-time)
+ * Following the reference kem.c crypto_kem_dec logic:
+ *   1. indcpa_dec(buf, ct, sk)
+ *   2. buf+SYMBYTES = H(pk) from sk
+ *   3. G(buf) -> (K', r')
+ *   4. indcpa_enc(cmp, buf, pk, r')
+ *   5. fail = verify(ct, cmp)
+ *   6. rkprf: ss = J(z || ct)
+ *   7. cmov(ss, kr, !fail)
  */
 pqc_status_t pqc_mlkem_decaps(const pqc_mlkem_params_t *params,
                                uint8_t *ss,
                                const uint8_t *ct,
                                const uint8_t *sk)
 {
-    uint8_t m_prime[PQC_MLKEM_SYMBYTES];
-    uint8_t g_input[2 * PQC_MLKEM_SYMBYTES];
-    uint8_t g_output[2 * PQC_MLKEM_SYMBYTES]; /* (K', r') */
-    uint8_t ct_cmp[1568]; /* max ciphertext size (ML-KEM-1024) */
-    uint8_t k_bar[PQC_MLKEM_SYMBYTES]; /* implicit rejection key */
     int fail;
-
-    const uint8_t *sk_pke = sk;
-    const uint8_t *pk     = sk + params->indcpa_sk_bytes;
-    const uint8_t *h_pk   = sk + params->indcpa_sk_bytes + params->indcpa_pk_bytes;
-    const uint8_t *z      = sk + params->indcpa_sk_bytes + params->indcpa_pk_bytes + PQC_MLKEM_SYMBYTES;
+    uint8_t buf[2 * PQC_MLKEM_SYMBYTES];
+    uint8_t kr[2 * PQC_MLKEM_SYMBYTES]; /* will contain key, coins */
+    uint8_t cmp[1568]; /* max ciphertext size (ML-KEM-1024) */
+    const uint8_t *pk = sk + params->indcpa_sk_bytes;
 
     if (!params || !ss || !ct || !sk) {
         return PQC_ERROR_INVALID_ARGUMENT;
     }
 
-    /* Step 1: m' = K-PKE.Decrypt(sk_pke, c) */
-    pqc_mlkem_indcpa_dec(m_prime, ct, sk_pke, params);
+    /* Step 1: m' = indcpa_dec(ct, sk) */
+    pqc_mlkem_indcpa_dec(buf, ct, sk, params);
 
-    /* Step 2: (K', r') = G(m' || h) */
-    memcpy(g_input, m_prime, PQC_MLKEM_SYMBYTES);
-    memcpy(g_input + PQC_MLKEM_SYMBYTES, h_pk, PQC_MLKEM_SYMBYTES);
-    pqc_sha3_512(g_output, g_input, 2 * PQC_MLKEM_SYMBYTES);
+    /* Step 2: Multitarget countermeasure for coins + contributory KEM
+     * Copy H(pk) from the secret key into buf */
+    memcpy(buf + PQC_MLKEM_SYMBYTES,
+           sk + params->sk_bytes - 2 * PQC_MLKEM_SYMBYTES,
+           PQC_MLKEM_SYMBYTES);
 
-    /* Step 3: c' = K-PKE.Encrypt(pk, m', r') */
-    pqc_mlkem_indcpa_enc(ct_cmp, m_prime, pk, g_output + PQC_MLKEM_SYMBYTES, params);
+    /* Step 3: (K', r') = G(m' || H(pk)) */
+    pqc_sha3_512(kr, buf, 2 * PQC_MLKEM_SYMBYTES);
 
-    /* Step 4: Compare c and c' in constant time */
-    fail = pqc_mlkem_verify(ct, ct_cmp, params->ct_bytes);
+    /* Step 4: c' = indcpa_enc(pk, m', r') */
+    pqc_mlkem_indcpa_enc(cmp, buf, pk, kr + PQC_MLKEM_SYMBYTES, params);
 
-    /* Step 5: K_bar = J(z || c)  -- implicit rejection value */
+    /* Step 5: Compare c and c' in constant time */
+    fail = pqc_mlkem_verify(ct, cmp, params->ct_bytes);
+
+    /* Step 6: Compute rejection key ss = J(z || ct)  (rkprf) */
     {
         pqc_shake256_ctx jctx;
         pqc_shake256_init(&jctx);
-        pqc_shake256_absorb(&jctx, z, PQC_MLKEM_SYMBYTES);
+        pqc_shake256_absorb(&jctx, sk + params->sk_bytes - PQC_MLKEM_SYMBYTES,
+                             PQC_MLKEM_SYMBYTES);
         pqc_shake256_absorb(&jctx, ct, params->ct_bytes);
         pqc_shake256_finalize(&jctx);
-        pqc_shake256_squeeze(&jctx, k_bar, PQC_MLKEM_SYMBYTES);
+        pqc_shake256_squeeze(&jctx, ss, PQC_MLKEM_SSBYTES);
     }
 
-    /* Step 6: K = (fail == 0) ? K' : K_bar   (constant-time) */
-    memcpy(ss, g_output, PQC_MLKEM_SYMBYTES);
-    pqc_mlkem_cmov(ss, k_bar, PQC_MLKEM_SYMBYTES, (uint8_t)(fail & 1));
+    /* Step 7: Copy true key to return buffer if fail is false */
+    pqc_mlkem_cmov(ss, kr, PQC_MLKEM_SYMBYTES, !fail);
 
     return PQC_OK;
 }

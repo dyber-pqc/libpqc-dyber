@@ -7,6 +7,8 @@
  *
  * This is the inner PKE that the Fujisaki-Okamoto transform in mlkem.c
  * wraps to achieve IND-CCA2 security.
+ *
+ * Based on the reference implementation from pq-crystals/kyber.
  */
 
 #ifndef PQC_MLKEM_INDCPA_H
@@ -15,21 +17,38 @@
 #include <stdint.h>
 
 #include "core/kem/mlkem/mlkem_params.h"
+#include "core/kem/mlkem/polyvec.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * K-PKE.KeyGen (Algorithm 12 in FIPS 203).
+ * Generate the matrix A (or A^T) from a seed.
+ * This is exposed for benchmarking; normally only used internally.
  *
- * @param pk      Output: public key  (params->indcpa_pk_bytes bytes).
- * @param sk      Output: secret key  (params->indcpa_sk_bytes bytes).
- * @param params  Parameter set descriptor.
+ * @param a          Output: array of k polyvecs (k x k matrix in NTT domain)
+ * @param seed       Input: public seed rho (PQC_MLKEM_SYMBYTES bytes)
+ * @param k          Module rank (2, 3, or 4)
+ * @param transposed If nonzero, generate A^T instead of A
  */
-void pqc_mlkem_indcpa_keygen(uint8_t *pk,
-                              uint8_t *sk,
-                              const pqc_mlkem_params_t *params);
+void pqc_mlkem_gen_matrix(pqc_mlkem_polyvec *a,
+                           const uint8_t seed[PQC_MLKEM_SYMBYTES],
+                           unsigned int k,
+                           int transposed);
+
+/**
+ * K-PKE.KeyGen (deterministic, from coins).
+ *
+ * @param pk     Output: public key  (params->indcpa_pk_bytes bytes).
+ * @param sk     Output: secret key  (params->indcpa_sk_bytes bytes).
+ * @param coins  Input: 32-byte randomness seed d.
+ * @param params Parameter set descriptor.
+ */
+void pqc_mlkem_indcpa_keypair_derand(uint8_t *pk,
+                                      uint8_t *sk,
+                                      const uint8_t coins[PQC_MLKEM_SYMBYTES],
+                                      const pqc_mlkem_params_t *params);
 
 /**
  * K-PKE.Encrypt (Algorithm 13 in FIPS 203).

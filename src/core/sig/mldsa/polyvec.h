@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Polynomial vector operations for ML-DSA.
+ *
+ * Adapted from the reference pq-crystals/dilithium implementation
+ * (Public Domain / CC0).
  */
 
 #ifndef PQC_MLDSA_POLYVEC_H
@@ -17,7 +20,7 @@ extern "C" {
 #endif
 
 /* ------------------------------------------------------------------ */
-/* Polynomial vector type (max dimension)                               */
+/* Polynomial vector types (max dimension)                              */
 /* ------------------------------------------------------------------ */
 
 typedef struct {
@@ -46,6 +49,16 @@ void pqc_mldsa_polyvecl_pointwise_poly(pqc_mldsa_polyvecl *r,
                                         const pqc_mldsa_polyvecl *v,
                                         unsigned l);
 
+/**
+ * Pointwise multiply vectors of polynomials of length l, multiply
+ * resulting vector by 2^{-32} and add (accumulate) polynomials.
+ * Input/output vectors are in NTT domain.
+ */
+void pqc_mldsa_polyvecl_pointwise_acc(pqc_mldsa_poly *w,
+                                       const pqc_mldsa_polyvecl *u,
+                                       const pqc_mldsa_polyvecl *v,
+                                       unsigned l);
+
 int pqc_mldsa_polyvecl_chknorm(const pqc_mldsa_polyvecl *v,
                                 int32_t bound, unsigned l);
 
@@ -68,6 +81,11 @@ void pqc_mldsa_polyveck_invntt(pqc_mldsa_polyveck *v, unsigned k);
 void pqc_mldsa_polyveck_reduce(pqc_mldsa_polyveck *v, unsigned k);
 void pqc_mldsa_polyveck_caddq(pqc_mldsa_polyveck *v, unsigned k);
 void pqc_mldsa_polyveck_shiftl(pqc_mldsa_polyveck *v, unsigned k);
+
+void pqc_mldsa_polyveck_pointwise_poly(pqc_mldsa_polyveck *r,
+                                        const pqc_mldsa_poly *a,
+                                        const pqc_mldsa_polyveck *v,
+                                        unsigned k);
 
 int pqc_mldsa_polyveck_chknorm(const pqc_mldsa_polyveck *v,
                                 int32_t bound, unsigned k);
@@ -93,12 +111,26 @@ void pqc_mldsa_polyveck_use_hint(pqc_mldsa_polyveck *w,
                                   int32_t gamma2, unsigned k);
 
 /* ------------------------------------------------------------------ */
-/* Matrix-vector product: t = A * s  (A in NTT domain)                  */
+/* Pack w1 into byte array                                              */
 /* ------------------------------------------------------------------ */
+
+void pqc_mldsa_polyveck_pack_w1(uint8_t *r,
+                                 const pqc_mldsa_polyveck *w1,
+                                 unsigned k, int32_t gamma2,
+                                 size_t polyw1_packed);
+
+/* ------------------------------------------------------------------ */
+/* Matrix-vector product: t = A * s  (A in NTT domain)                  */
+/* A is stored row-major: mat[i] is the i-th row (a polyvecl).          */
+/* ------------------------------------------------------------------ */
+
+void pqc_mldsa_polyvec_matrix_expand(pqc_mldsa_polyvecl *mat,
+                                      const uint8_t rho[PQC_MLDSA_SEEDBYTES],
+                                      unsigned k, unsigned l);
 
 void pqc_mldsa_polyvec_matrix_pointwise(
     pqc_mldsa_polyveck *t,
-    const pqc_mldsa_poly mat[PQC_MLDSA_K_MAX * PQC_MLDSA_L_MAX],
+    const pqc_mldsa_polyvecl *mat,
     const pqc_mldsa_polyvecl *s,
     unsigned k, unsigned l);
 

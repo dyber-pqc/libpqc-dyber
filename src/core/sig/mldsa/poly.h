@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Polynomial operations for ML-DSA.
+ *
+ * Adapted from the reference pq-crystals/dilithium implementation
+ * (Public Domain / CC0).
  */
 
 #ifndef PQC_MLDSA_POLY_H

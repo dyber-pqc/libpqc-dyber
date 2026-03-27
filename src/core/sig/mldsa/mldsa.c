@@ -5,6 +5,9 @@
  *
  * ML-DSA (FIPS 204) - Module-Lattice-Based Digital Signature Algorithm.
  * Key generation, signing, and verification.
+ *
+ * Adapted from the reference pq-crystals/dilithium implementation
+ * (Public Domain / CC0).
  */
 
 #include <string.h>
@@ -85,81 +88,68 @@ const pqc_mldsa_params_t PQC_MLDSA_87 = {
 };
 
 /* ================================================================= */
-/*  ML-DSA.KeyGen (Algorithm 1 in FIPS 204)                            */
+/*  ML-DSA.KeyGen                                                      */
+/*  Reference: crypto_sign_keypair in pq-crystals/dilithium            */
 /* ================================================================= */
 
 pqc_status_t pqc_mldsa_keygen(const pqc_mldsa_params_t *params,
                                uint8_t *pk, uint8_t *sk)
 {
-    uint8_t seed[32];
-    uint8_t expanded[128]; /* rho(32) || rhoprime(64) || K(32) */
-    uint8_t rho[PQC_MLDSA_SEEDBYTES];
-    uint8_t rhoprime[PQC_MLDSA_CRHBYTES];
-    uint8_t K[PQC_MLDSA_SEEDBYTES];
+    uint8_t seedbuf[2 * PQC_MLDSA_SEEDBYTES + PQC_MLDSA_CRHBYTES];
     uint8_t tr[PQC_MLDSA_TRBYTES];
-
-    pqc_mldsa_poly mat[PQC_MLDSA_K_MAX * PQC_MLDSA_L_MAX];
+    const uint8_t *rho, *rhoprime, *key;
+    pqc_mldsa_polyvecl mat[PQC_MLDSA_K_MAX];
     pqc_mldsa_polyvecl s1, s1hat;
-    pqc_mldsa_polyveck s2, t, t1, t0;
+    pqc_mldsa_polyveck s2, t1, t0;
     pqc_status_t status;
 
     if (!params || !pk || !sk)
         return PQC_ERROR_INVALID_ARGUMENT;
 
-    /* Step 1: Generate random seed xi */
-    status = pqc_randombytes(seed, 32);
+    /* Get randomness for rho, rhoprime and key */
+    status = pqc_randombytes(seedbuf, PQC_MLDSA_SEEDBYTES);
     if (status != PQC_OK)
         return PQC_ERROR_RNG_FAILED;
 
-    /* Step 2: H(xi || k || l) -> rho, rhoprime, K
-     * Per FIPS 204, expand seed with SHAKE-256 */
-    {
-        uint8_t hashbuf[34];
-        memcpy(hashbuf, seed, 32);
-        hashbuf[32] = (uint8_t)params->k;
-        hashbuf[33] = (uint8_t)params->l;
-        pqc_shake256(expanded, 128, hashbuf, 34);
-    }
+    seedbuf[PQC_MLDSA_SEEDBYTES + 0] = (uint8_t)params->k;
+    seedbuf[PQC_MLDSA_SEEDBYTES + 1] = (uint8_t)params->l;
+    pqc_shake256(seedbuf,
+                 2 * PQC_MLDSA_SEEDBYTES + PQC_MLDSA_CRHBYTES,
+                 seedbuf, PQC_MLDSA_SEEDBYTES + 2);
+    rho = seedbuf;
+    rhoprime = rho + PQC_MLDSA_SEEDBYTES;
+    key = rhoprime + PQC_MLDSA_CRHBYTES;
 
-    memcpy(rho, expanded, 32);
-    memcpy(rhoprime, expanded + 32, 64);
-    memcpy(K, expanded + 96, 32);
+    /* Expand matrix A from rho */
+    pqc_mldsa_polyvec_matrix_expand(mat, rho, params->k, params->l);
 
-    /* Step 3: Expand matrix A from rho */
-    pqc_mldsa_expand_a(mat, rho, params->k, params->l);
-
-    /* Step 4-5: Sample secret vectors s1, s2 */
+    /* Sample short vectors s1 and s2 */
     pqc_mldsa_expand_s(&s1, rhoprime, params->eta, params->l, 0);
     pqc_mldsa_expand_s((pqc_mldsa_polyvecl *)&s2, rhoprime,
-                        params->eta, params->k, params->l);
+                        params->eta, params->k, (uint16_t)params->l);
 
-    /* Step 6: t = A * NTT(s1) + s2 */
+    /* Matrix-vector multiplication: t = A * NTT(s1) */
     s1hat = s1;
     pqc_mldsa_polyvecl_ntt(&s1hat, params->l);
-    pqc_mldsa_polyvec_matrix_pointwise(&t, mat, &s1hat,
+    pqc_mldsa_polyvec_matrix_pointwise(&t1, mat, &s1hat,
                                         params->k, params->l);
-    pqc_mldsa_polyveck_reduce(&t, params->k);
-    pqc_mldsa_polyveck_invntt(&t, params->k);
-    pqc_mldsa_polyveck_add(&t, &t, &s2, params->k);
-    pqc_mldsa_polyveck_caddq(&t, params->k);
+    pqc_mldsa_polyveck_reduce(&t1, params->k);
+    pqc_mldsa_polyveck_invntt(&t1, params->k);
 
-    /* Step 7: Power2Round(t) -> (t1, t0) */
-    pqc_mldsa_polyveck_power2round(&t1, &t0, &t, params->k);
+    /* Add error vector s2 */
+    pqc_mldsa_polyveck_add(&t1, &t1, &s2, params->k);
 
-    /* Step 8: Pack public key */
+    /* Extract t1 and write public key */
+    pqc_mldsa_polyveck_caddq(&t1, params->k);
+    pqc_mldsa_polyveck_power2round(&t1, &t0, &t1, params->k);
     pqc_mldsa_pack_pk(pk, rho, &t1, params->k);
 
-    /* Step 9: Compute tr = H(pk) using SHAKE-256 */
+    /* Compute tr = H(pk) and write secret key */
     pqc_shake256(tr, PQC_MLDSA_TRBYTES, pk, params->pk_bytes);
-
-    /* Step 10: Pack secret key */
-    pqc_mldsa_pack_sk(sk, rho, K, tr, &s1, &s2, &t0, params);
+    pqc_mldsa_pack_sk(sk, rho, tr, key, &t0, &s1, &s2, params);
 
     /* Zeroize sensitive intermediates */
-    pqc_memzero(seed, sizeof(seed));
-    pqc_memzero(expanded, sizeof(expanded));
-    pqc_memzero(rhoprime, sizeof(rhoprime));
-    pqc_memzero(K, sizeof(K));
+    pqc_memzero(seedbuf, sizeof(seedbuf));
     pqc_memzero(&s1, sizeof(s1));
     pqc_memzero(&s1hat, sizeof(s1hat));
     pqc_memzero(&s2, sizeof(s2));
@@ -169,7 +159,8 @@ pqc_status_t pqc_mldsa_keygen(const pqc_mldsa_params_t *params,
 }
 
 /* ================================================================= */
-/*  ML-DSA.Sign (Algorithm 2 in FIPS 204)                              */
+/*  ML-DSA.Sign                                                        */
+/*  Reference: crypto_sign_signature_internal in pq-crystals/dilithium */
 /* ================================================================= */
 
 pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
@@ -177,198 +168,123 @@ pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
                              const uint8_t *msg, size_t msglen,
                              const uint8_t *sk)
 {
-    uint8_t rho[PQC_MLDSA_SEEDBYTES];
-    uint8_t K[PQC_MLDSA_SEEDBYTES];
-    uint8_t tr[PQC_MLDSA_TRBYTES];
-    uint8_t mu[PQC_MLDSA_CRHBYTES];
-    uint8_t rhoprime[PQC_MLDSA_CRHBYTES];
-    uint8_t ctilde[PQC_MLDSA87_CTILDEBYTES]; /* max size */
-
-    pqc_mldsa_poly mat[PQC_MLDSA_K_MAX * PQC_MLDSA_L_MAX];
-    pqc_mldsa_polyvecl s1, s1hat, y, yhat, z;
-    pqc_mldsa_polyveck s2, t0, w, w1, w0, h, cs2, ct0;
+    unsigned int n;
+    uint8_t seedbuf[2 * PQC_MLDSA_SEEDBYTES + PQC_MLDSA_TRBYTES +
+                     2 * PQC_MLDSA_CRHBYTES];
+    uint8_t *rho, *tr, *key, *mu, *rhoprime;
+    uint8_t rnd[PQC_MLDSA_SEEDBYTES];
+    uint16_t nonce = 0;
+    pqc_mldsa_polyvecl mat[PQC_MLDSA_K_MAX], s1, y, z;
+    pqc_mldsa_polyveck t0, s2, w1, w0, h;
     pqc_mldsa_poly cp;
-    unsigned n_hints;
-    uint16_t kappa;
-    int reject;
+    uint8_t w1_packed[PQC_MLDSA_K_MAX * 192]; /* max k * polyw1_packed */
+    pqc_shake256_ctx state;
 
     if (!params || !sig || !siglen || !msg || !sk)
         return PQC_ERROR_INVALID_ARGUMENT;
 
-    /* Step 1: Unpack secret key */
-    pqc_mldsa_unpack_sk(rho, K, tr, &s1, &s2, &t0, sk, params);
+    rho = seedbuf;
+    tr = rho + PQC_MLDSA_SEEDBYTES;
+    key = tr + PQC_MLDSA_TRBYTES;
+    mu = key + PQC_MLDSA_SEEDBYTES;
+    rhoprime = mu + PQC_MLDSA_CRHBYTES;
 
-    /* Step 2: Compute mu = H(tr || msg) using SHAKE-256 */
-    {
-        pqc_shake256_ctx ctx;
-        pqc_shake256_init(&ctx);
-        pqc_shake256_absorb(&ctx, tr, PQC_MLDSA_TRBYTES);
-        pqc_shake256_absorb(&ctx, msg, msglen);
-        pqc_shake256_finalize(&ctx);
-        pqc_shake256_squeeze(&ctx, mu, PQC_MLDSA_CRHBYTES);
-    }
+    pqc_mldsa_unpack_sk(rho, tr, key, &t0, &s1, &s2, sk, params);
 
-    /* Step 3: Compute rhoprime = H(K || rnd || mu)
-     * For deterministic signing (FIPS 204), rnd = 0^32.
-     * For hedged signing, rnd is random. We use random. */
-    {
-        uint8_t rnd[32];
-        pqc_shake256_ctx ctx;
+    /* Compute mu = CRH(tr, msg) */
+    pqc_shake256_init(&state);
+    pqc_shake256_absorb(&state, tr, PQC_MLDSA_TRBYTES);
+    pqc_shake256_absorb(&state, msg, msglen);
+    pqc_shake256_finalize(&state);
+    pqc_shake256_squeeze(&state, mu, PQC_MLDSA_CRHBYTES);
 
-        pqc_randombytes(rnd, 32);
+    /* Compute rhoprime = CRH(key, rnd, mu)
+     * Use hedged signing: rnd is random */
+    pqc_randombytes(rnd, PQC_MLDSA_SEEDBYTES);
 
-        pqc_shake256_init(&ctx);
-        pqc_shake256_absorb(&ctx, K, PQC_MLDSA_SEEDBYTES);
-        pqc_shake256_absorb(&ctx, rnd, 32);
-        pqc_shake256_absorb(&ctx, mu, PQC_MLDSA_CRHBYTES);
-        pqc_shake256_finalize(&ctx);
-        pqc_shake256_squeeze(&ctx, rhoprime, PQC_MLDSA_CRHBYTES);
+    pqc_shake256_init(&state);
+    pqc_shake256_absorb(&state, key, PQC_MLDSA_SEEDBYTES);
+    pqc_shake256_absorb(&state, rnd, PQC_MLDSA_SEEDBYTES);
+    pqc_shake256_absorb(&state, mu, PQC_MLDSA_CRHBYTES);
+    pqc_shake256_finalize(&state);
+    pqc_shake256_squeeze(&state, rhoprime, PQC_MLDSA_CRHBYTES);
 
-        pqc_memzero(rnd, sizeof(rnd));
-    }
-
-    /* Step 4: Expand matrix A */
-    pqc_mldsa_expand_a(mat, rho, params->k, params->l);
-
-    /* Step 5: NTT(s1), NTT(s2), NTT(t0) for fast multiplication */
-    s1hat = s1;
-    pqc_mldsa_polyvecl_ntt(&s1hat, params->l);
+    /* Expand matrix and transform vectors */
+    pqc_mldsa_polyvec_matrix_expand(mat, rho, params->k, params->l);
+    pqc_mldsa_polyvecl_ntt(&s1, params->l);
     pqc_mldsa_polyveck_ntt((pqc_mldsa_polyveck *)&s2, params->k);
     pqc_mldsa_polyveck_ntt(&t0, params->k);
 
-    /* Step 6: Rejection sampling loop */
-    kappa = 0;
-    for (;;) {
-        /* Step 7: y = ExpandMask(rhoprime, kappa) */
-        pqc_mldsa_expand_mask(&y, rhoprime, kappa, params->gamma1, params->l);
-        kappa += (uint16_t)params->l;
+    /* Rejection sampling loop */
+rej:
+    /* Sample intermediate vector y */
+    pqc_mldsa_expand_mask(&y, rhoprime, nonce++, params->gamma1, params->l);
 
-        /* Step 8: w = A * NTT(y) */
-        yhat = y;
-        pqc_mldsa_polyvecl_ntt(&yhat, params->l);
-        pqc_mldsa_polyvec_matrix_pointwise(&w, mat, &yhat,
-                                            params->k, params->l);
-        pqc_mldsa_polyveck_reduce(&w, params->k);
-        pqc_mldsa_polyveck_invntt(&w, params->k);
-        pqc_mldsa_polyveck_caddq(&w, params->k);
+    /* w = A * NTT(y) */
+    z = y;
+    pqc_mldsa_polyvecl_ntt(&z, params->l);
+    pqc_mldsa_polyvec_matrix_pointwise(&w1, mat, &z,
+                                        params->k, params->l);
+    pqc_mldsa_polyveck_reduce(&w1, params->k);
+    pqc_mldsa_polyveck_invntt(&w1, params->k);
 
-        /* Step 9: Decompose w into (w1, w0) */
-        pqc_mldsa_polyveck_decompose(&w1, &w0, &w,
+    /* Decompose w and call the random oracle */
+    pqc_mldsa_polyveck_caddq(&w1, params->k);
+    pqc_mldsa_polyveck_decompose(&w1, &w0, &w1,
+                                  params->gamma2, params->k);
+    pqc_mldsa_polyveck_pack_w1(sig, &w1, params->k,
+                                params->gamma2, params->polyw1_packed);
+
+    pqc_shake256_init(&state);
+    pqc_shake256_absorb(&state, mu, PQC_MLDSA_CRHBYTES);
+    pqc_shake256_absorb(&state, sig, params->k * params->polyw1_packed);
+    pqc_shake256_finalize(&state);
+    pqc_shake256_squeeze(&state, sig, params->ctilde_bytes);
+
+    pqc_mldsa_poly_challenge(&cp, sig, params->ctilde_bytes, params->tau);
+    pqc_mldsa_poly_ntt(&cp);
+
+    /* Compute z, reject if it reveals secret */
+    pqc_mldsa_polyvecl_pointwise_poly(&z, &cp, &s1, params->l);
+    pqc_mldsa_polyvecl_invntt(&z, params->l);
+    pqc_mldsa_polyvecl_add(&z, &z, &y, params->l);
+    pqc_mldsa_polyvecl_reduce(&z, params->l);
+    if (pqc_mldsa_polyvecl_chknorm(&z,
+            params->gamma1 - (int32_t)params->beta, params->l))
+        goto rej;
+
+    /* Check that subtracting cs2 does not change high bits of w and
+     * low bits do not reveal secret information */
+    pqc_mldsa_polyveck_pointwise_poly(&h, &cp, &s2, params->k);
+    pqc_mldsa_polyveck_invntt(&h, params->k);
+    pqc_mldsa_polyveck_sub(&w0, &w0, &h, params->k);
+    pqc_mldsa_polyveck_reduce(&w0, params->k);
+    if (pqc_mldsa_polyveck_chknorm(&w0,
+            params->gamma2 - (int32_t)params->beta, params->k))
+        goto rej;
+
+    /* Compute hints for w1 */
+    pqc_mldsa_polyveck_pointwise_poly(&h, &cp, &t0, params->k);
+    pqc_mldsa_polyveck_invntt(&h, params->k);
+    pqc_mldsa_polyveck_reduce(&h, params->k);
+    if (pqc_mldsa_polyveck_chknorm(&h,
+            (int32_t)params->gamma2, params->k))
+        goto rej;
+
+    pqc_mldsa_polyveck_add(&w0, &w0, &h, params->k);
+    n = pqc_mldsa_polyveck_make_hint(&h, &w0, &w1,
                                       params->gamma2, params->k);
+    if (n > params->omega)
+        goto rej;
 
-        /* Step 10: Compute challenge hash c_tilde = H(mu || w1) */
-        {
-            pqc_shake256_ctx ctx;
-            unsigned i;
-            uint8_t w1_packed[PQC_MLDSA_K_MAX * 192]; /* max w1 packed */
-
-            for (i = 0; i < params->k; i++) {
-                pqc_mldsa_polyw1_pack(
-                    w1_packed + i * params->polyw1_packed,
-                    &w1.vec[i], params->gamma2);
-            }
-
-            pqc_shake256_init(&ctx);
-            pqc_shake256_absorb(&ctx, mu, PQC_MLDSA_CRHBYTES);
-            pqc_shake256_absorb(&ctx, w1_packed,
-                                params->k * params->polyw1_packed);
-            pqc_shake256_finalize(&ctx);
-            pqc_shake256_squeeze(&ctx, ctilde, params->ctilde_bytes);
-        }
-
-        /* Step 11: Challenge polynomial c */
-        pqc_mldsa_poly_challenge(&cp, ctilde, params->ctilde_bytes,
-                                  params->tau);
-        pqc_mldsa_poly_ntt(&cp);
-
-        /* Step 12: z = y + c * s1 */
-        {
-            unsigned i;
-            pqc_mldsa_poly tmp;
-            for (i = 0; i < params->l; i++) {
-                pqc_mldsa_poly_pointwise(&tmp, &cp, &s1hat.vec[i]);
-                pqc_mldsa_poly_invntt(&tmp);
-                pqc_mldsa_poly_add(&z.vec[i], &y.vec[i], &tmp);
-                pqc_mldsa_poly_reduce(&z.vec[i]);
-            }
-        }
-
-        /* Step 13: Check ||z||_inf < gamma1 - beta */
-        reject = pqc_mldsa_polyvecl_chknorm(
-            &z, params->gamma1 - (int32_t)params->beta, params->l);
-        if (reject)
-            continue;
-
-        /* Step 14: Compute cs2 = c * s2, check ||w0 - cs2||_inf < gamma2 - beta */
-        {
-            unsigned i;
-            pqc_mldsa_poly tmp;
-            for (i = 0; i < params->k; i++) {
-                pqc_mldsa_poly_pointwise(&tmp, &cp, &s2.vec[i]);
-                pqc_mldsa_poly_invntt(&tmp);
-                pqc_mldsa_poly_sub(&cs2.vec[i], &w0.vec[i], &tmp);
-                pqc_mldsa_poly_reduce(&cs2.vec[i]);
-            }
-        }
-
-        reject = pqc_mldsa_polyveck_chknorm(
-            &cs2, params->gamma2 - (int32_t)params->beta, params->k);
-        if (reject)
-            continue;
-
-        /* Step 15: Compute ct0 = c * t0, check ||ct0||_inf < gamma2 */
-        {
-            unsigned i;
-            for (i = 0; i < params->k; i++) {
-                pqc_mldsa_poly_pointwise(&ct0.vec[i], &cp, &t0.vec[i]);
-                pqc_mldsa_poly_invntt(&ct0.vec[i]);
-                pqc_mldsa_poly_reduce(&ct0.vec[i]);
-            }
-        }
-
-        reject = pqc_mldsa_polyveck_chknorm(
-            &ct0, (int32_t)params->gamma2, params->k);
-        if (reject)
-            continue;
-
-        /* Step 16: Compute hint h = MakeHint(-ct0, w - cs2 + ct0, gamma2)
-         *
-         * Per FIPS 204: cs2 currently holds (w0 - c*s2).
-         * We need MakeHint(-ct0, (w0 - c*s2) + ct0, gamma2).
-         * The first argument is the "low part" and the second is the
-         * "candidate high part" input to MakeHint. */
-        {
-            unsigned i, j;
-            pqc_mldsa_polyveck r0, r1;
-
-            for (i = 0; i < params->k; i++) {
-                /* r1 = (w0 - c*s2) + c*t0 */
-                pqc_mldsa_poly_add(&r1.vec[i], &cs2.vec[i], &ct0.vec[i]);
-
-                /* r0 = -c*t0 (negate ct0) */
-                for (j = 0; j < PQC_MLDSA_N; j++)
-                    r0.vec[i].coeffs[j] = -ct0.vec[i].coeffs[j];
-            }
-
-            n_hints = pqc_mldsa_polyveck_make_hint(
-                &h, &r0, &r1, params->gamma2, params->k);
-        }
-
-        if (n_hints > params->omega)
-            continue;
-
-        /* Success: pack signature */
-        pqc_mldsa_pack_sig(sig, ctilde, &z, &h, params);
-        *siglen = params->sig_bytes;
-
-        break;
-    }
+    /* Write signature: sig = (c_tilde || z || h) */
+    pqc_mldsa_pack_sig(sig, sig, &z, &h, params);
+    *siglen = params->sig_bytes;
 
     /* Zeroize sensitive state */
-    pqc_memzero(K, sizeof(K));
-    pqc_memzero(rhoprime, sizeof(rhoprime));
+    pqc_memzero(seedbuf, sizeof(seedbuf));
+    pqc_memzero(rnd, sizeof(rnd));
     pqc_memzero(&s1, sizeof(s1));
-    pqc_memzero(&s1hat, sizeof(s1hat));
     pqc_memzero(&s2, sizeof(s2));
     pqc_memzero(&t0, sizeof(t0));
 
@@ -376,7 +292,8 @@ pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
 }
 
 /* ================================================================= */
-/*  ML-DSA.Verify (Algorithm 3 in FIPS 204)                            */
+/*  ML-DSA.Verify                                                      */
+/*  Reference: crypto_sign_verify_internal in pq-crystals/dilithium    */
 /* ================================================================= */
 
 pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
@@ -384,16 +301,16 @@ pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
                                const uint8_t *sig, size_t siglen,
                                const uint8_t *pk)
 {
+    unsigned int i;
+    uint8_t buf[PQC_MLDSA_K_MAX * 192]; /* max k * polyw1_packed */
     uint8_t rho[PQC_MLDSA_SEEDBYTES];
-    uint8_t tr[PQC_MLDSA_TRBYTES];
     uint8_t mu[PQC_MLDSA_CRHBYTES];
-    uint8_t ctilde[PQC_MLDSA87_CTILDEBYTES];
-    uint8_t ctilde2[PQC_MLDSA87_CTILDEBYTES];
-
-    pqc_mldsa_poly mat[PQC_MLDSA_K_MAX * PQC_MLDSA_L_MAX];
-    pqc_mldsa_polyveck t1, w1prime, h;
-    pqc_mldsa_polyvecl z;
+    uint8_t c[PQC_MLDSA87_CTILDEBYTES];  /* max ctilde size */
+    uint8_t c2[PQC_MLDSA87_CTILDEBYTES];
     pqc_mldsa_poly cp;
+    pqc_mldsa_polyvecl mat[PQC_MLDSA_K_MAX], z;
+    pqc_mldsa_polyveck t1, w1, h;
+    pqc_shake256_ctx state;
 
     if (!params || !msg || !sig || !pk)
         return PQC_ERROR_INVALID_ARGUMENT;
@@ -401,95 +318,55 @@ pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
     if (siglen != params->sig_bytes)
         return PQC_ERROR_VERIFICATION_FAILED;
 
-    /* Step 1: Unpack public key */
     pqc_mldsa_unpack_pk(rho, &t1, pk, params->k);
-
-    /* Step 2: Unpack signature */
-    if (pqc_mldsa_unpack_sig(ctilde, &z, &h, sig, params) != 0)
+    if (pqc_mldsa_unpack_sig(c, &z, &h, sig, params))
+        return PQC_ERROR_VERIFICATION_FAILED;
+    if (pqc_mldsa_polyvecl_chknorm(&z,
+            params->gamma1 - (int32_t)params->beta, params->l))
         return PQC_ERROR_VERIFICATION_FAILED;
 
-    /* Step 3: Check ||z||_inf < gamma1 - beta */
-    if (pqc_mldsa_polyvecl_chknorm(&z, params->gamma1 - (int32_t)params->beta,
-                                     params->l))
-        return PQC_ERROR_VERIFICATION_FAILED;
+    /* Compute mu = CRH(H(rho, t1), msg) */
+    pqc_shake256(mu, PQC_MLDSA_TRBYTES, pk, params->pk_bytes);
+    pqc_shake256_init(&state);
+    pqc_shake256_absorb(&state, mu, PQC_MLDSA_TRBYTES);
+    pqc_shake256_absorb(&state, msg, msglen);
+    pqc_shake256_finalize(&state);
+    pqc_shake256_squeeze(&state, mu, PQC_MLDSA_CRHBYTES);
 
-    /* Step 4: Compute tr = H(pk) */
-    pqc_shake256(tr, PQC_MLDSA_TRBYTES, pk, params->pk_bytes);
+    /* Matrix-vector multiplication; compute Az - c*2^d*t1 */
+    pqc_mldsa_poly_challenge(&cp, c, params->ctilde_bytes, params->tau);
+    pqc_mldsa_polyvec_matrix_expand(mat, rho, params->k, params->l);
 
-    /* Step 5: Compute mu = H(tr || msg) */
-    {
-        pqc_shake256_ctx ctx;
-        pqc_shake256_init(&ctx);
-        pqc_shake256_absorb(&ctx, tr, PQC_MLDSA_TRBYTES);
-        pqc_shake256_absorb(&ctx, msg, msglen);
-        pqc_shake256_finalize(&ctx);
-        pqc_shake256_squeeze(&ctx, mu, PQC_MLDSA_CRHBYTES);
-    }
+    pqc_mldsa_polyvecl_ntt(&z, params->l);
+    pqc_mldsa_polyvec_matrix_pointwise(&w1, mat, &z,
+                                        params->k, params->l);
 
-    /* Step 6: Expand matrix A */
-    pqc_mldsa_expand_a(mat, rho, params->k, params->l);
-
-    /* Step 7: Compute challenge polynomial c from c_tilde */
-    pqc_mldsa_poly_challenge(&cp, ctilde, params->ctilde_bytes, params->tau);
     pqc_mldsa_poly_ntt(&cp);
+    pqc_mldsa_polyveck_shiftl(&t1, params->k);
+    pqc_mldsa_polyveck_ntt(&t1, params->k);
+    pqc_mldsa_polyveck_pointwise_poly(&t1, &cp, &t1, params->k);
 
-    /* Step 8: Compute w'1 = UseHint(h, A*NTT(z) - c*NTT(t1*2^d), gamma2)
-     *
-     * First: A * NTT(z) */
-    {
-        pqc_mldsa_polyvecl zhat;
-        pqc_mldsa_polyveck az, ct1;
-        unsigned i;
+    pqc_mldsa_polyveck_sub(&w1, &w1, &t1, params->k);
+    pqc_mldsa_polyveck_reduce(&w1, params->k);
+    pqc_mldsa_polyveck_invntt(&w1, params->k);
 
-        zhat = z;
-        pqc_mldsa_polyvecl_ntt(&zhat, params->l);
-        pqc_mldsa_polyvec_matrix_pointwise(&az, mat, &zhat,
-                                            params->k, params->l);
+    /* Reconstruct w1 */
+    pqc_mldsa_polyveck_caddq(&w1, params->k);
+    pqc_mldsa_polyveck_use_hint(&w1, &w1, &h,
+                                 params->gamma2, params->k);
+    pqc_mldsa_polyveck_pack_w1(buf, &w1, params->k,
+                                params->gamma2, params->polyw1_packed);
 
-        /* c * NTT(t1 * 2^d) */
-        pqc_mldsa_polyveck_shiftl(&t1, params->k);
-        pqc_mldsa_polyveck_ntt(&t1, params->k);
+    /* Call random oracle and verify challenge */
+    pqc_shake256_init(&state);
+    pqc_shake256_absorb(&state, mu, PQC_MLDSA_CRHBYTES);
+    pqc_shake256_absorb(&state, buf, params->k * params->polyw1_packed);
+    pqc_shake256_finalize(&state);
+    pqc_shake256_squeeze(&state, c2, params->ctilde_bytes);
 
-        for (i = 0; i < params->k; i++) {
-            pqc_mldsa_poly_pointwise(&ct1.vec[i], &cp, &t1.vec[i]);
-        }
-
-        /* w'_approx = A*z - c*t1*2^d */
-        for (i = 0; i < params->k; i++) {
-            pqc_mldsa_poly_sub(&az.vec[i], &az.vec[i], &ct1.vec[i]);
-        }
-        pqc_mldsa_polyveck_reduce(&az, params->k);
-        pqc_mldsa_polyveck_invntt(&az, params->k);
-        pqc_mldsa_polyveck_caddq(&az, params->k);
-
-        /* UseHint to recover w'1 */
-        pqc_mldsa_polyveck_use_hint(&w1prime, &az, &h,
-                                     params->gamma2, params->k);
-    }
-
-    /* Step 9: Recompute c_tilde' = H(mu || w'1) */
-    {
-        pqc_shake256_ctx ctx;
-        unsigned i;
-        uint8_t w1_packed[PQC_MLDSA_K_MAX * 192];
-
-        for (i = 0; i < params->k; i++) {
-            pqc_mldsa_polyw1_pack(
-                w1_packed + i * params->polyw1_packed,
-                &w1prime.vec[i], params->gamma2);
-        }
-
-        pqc_shake256_init(&ctx);
-        pqc_shake256_absorb(&ctx, mu, PQC_MLDSA_CRHBYTES);
-        pqc_shake256_absorb(&ctx, w1_packed,
-                            params->k * params->polyw1_packed);
-        pqc_shake256_finalize(&ctx);
-        pqc_shake256_squeeze(&ctx, ctilde2, params->ctilde_bytes);
-    }
-
-    /* Step 10: Check c_tilde == c_tilde' */
-    if (pqc_memcmp_ct(ctilde, ctilde2, params->ctilde_bytes) != 0)
-        return PQC_ERROR_VERIFICATION_FAILED;
+    for (i = 0; i < params->ctilde_bytes; ++i)
+        if (c[i] != c2[i])
+            return PQC_ERROR_VERIFICATION_FAILED;
 
     return PQC_OK;
 }
@@ -603,8 +480,8 @@ static const pqc_sig_vtable_t mldsa_vtables[] = {
 
 int pqc_sig_mldsa_register(void)
 {
-    unsigned i;
-    for (i = 0; i < sizeof(mldsa_vtables) / sizeof(mldsa_vtables[0]); i++) {
+    unsigned int i;
+    for (i = 0; i < sizeof(mldsa_vtables) / sizeof(mldsa_vtables[0]); ++i) {
         if (pqc_sig_add_vtable(&mldsa_vtables[i]) != 0)
             return -1;
     }
