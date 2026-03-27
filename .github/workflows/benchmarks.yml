@@ -122,17 +122,17 @@ jobs:
 
       - name: Run full benchmark suite (CSV)
         run: |
-          ./build/bench_all --csv --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.csv
+          ./build/tests/bench_all --csv --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.csv
         shell: bash
 
       - name: Run full benchmark suite (JSON)
         run: |
-          ./build/bench_all --json --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.json
+          ./build/tests/bench_all --json --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.json
         shell: bash
 
       - name: Run full benchmark suite (Table for logs)
         run: |
-          ./build/bench_all --iterations ${{ env.BENCHMARK_ITERATIONS }}
+          ./build/tests/bench_all --iterations ${{ env.BENCHMARK_ITERATIONS }}
         shell: bash
 
       # ---- Upload artifacts ----

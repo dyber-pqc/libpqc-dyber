@@ -6,7 +6,6 @@ if(MSVC)
 else()
     add_compile_options(
         -Wall -Wextra -Wpedantic
-        -Wconversion -Wsign-conversion
         -Wshadow -Wundef
         -Wformat=2 -Wformat-security
         -Wnull-dereference
@@ -14,6 +13,10 @@ else()
         -fstack-protector-strong
         -fno-strict-aliasing
     )
+    # Note: -Wconversion and -Wsign-conversion are intentionally omitted.
+    # The PQC reference implementations (Kyber, Dilithium, etc.) use
+    # idiomatic C patterns (int16_t arithmetic, bitwise ops) that produce
+    # hundreds of benign conversion warnings under these flags.
 
     # Position-independent code for shared libs
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
