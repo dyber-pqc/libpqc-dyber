@@ -1,0 +1,1 @@
+/usr/bin/cc -g -Wl,-z,relro,-z,now CMakeFiles/test_sig.dir/unit/test_sig_all.c.o -o test_sig  ../libpqc.a -lm 

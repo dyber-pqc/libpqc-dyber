@@ -99,7 +99,7 @@ void pqc_keccak_init(uint64_t state[25]) {
     memset(state, 0, 25 * sizeof(uint64_t));
 }
 
-void pqc_keccak_absorb(uint64_t state[25], unsigned int rate_bytes,
+void pqc_keccak_absorb(uint64_t state[25], size_t rate_bytes,
                         const uint8_t *data, size_t datalen)
 {
     size_t rate_lanes = rate_bytes / 8;
@@ -128,7 +128,7 @@ void pqc_keccak_absorb(uint64_t state[25], unsigned int rate_bytes,
     }
 }
 
-void pqc_keccak_squeeze(uint64_t state[25], unsigned int rate_bytes,
+void pqc_keccak_squeeze(uint64_t state[25], size_t rate_bytes,
                          uint8_t *out, size_t outlen)
 {
     size_t rate_lanes = rate_bytes / 8;

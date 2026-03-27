@@ -1,0 +1,1 @@
+/usr/bin/cc -g -Wl,-z,relro,-z,now CMakeFiles/test_integration.dir/integration/test_roundtrip.c.o -o test_integration  ../libpqc.a -lm 

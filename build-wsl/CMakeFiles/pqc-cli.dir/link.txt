@@ -1,0 +1,1 @@
+/usr/bin/cc -g -Wl,-z,relro,-z,now "CMakeFiles/pqc-cli.dir/bindings/shell/pqc_cli.c.o" -o pqc-cli  libpqc.a -lm 
