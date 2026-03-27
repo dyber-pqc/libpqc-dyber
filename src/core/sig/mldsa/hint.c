@@ -13,3 +13,4 @@
  */
 
 /* Intentionally empty - hint logic integrated into packing.c */
+typedef int pqc_mldsa_hint_empty_tu; /* Avoid empty translation unit warning */

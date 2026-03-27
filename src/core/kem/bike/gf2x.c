@@ -28,33 +28,9 @@ static inline void bit_set(uint64_t *v, uint32_t i)
     v[i / 64] |= (uint64_t)1 << (i % 64);
 }
 
-static inline void bit_clear(uint64_t *v, uint32_t i)
-{
-    v[i / 64] &= ~((uint64_t)1 << (i % 64));
-}
-
 static inline void bit_flip(uint64_t *v, uint32_t i)
 {
     v[i / 64] ^= (uint64_t)1 << (i % 64);
-}
-
-/* ------------------------------------------------------------------ */
-/* Popcount of a polynomial (number of set bits)                        */
-/* ------------------------------------------------------------------ */
-
-static uint32_t poly_weight(const uint64_t *v, uint32_t r)
-{
-    uint32_t r_words = (r + 63) / 64;
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < r_words; i++) {
-        uint64_t x = v[i];
-        /* Brian Kernighan's method */
-        while (x) {
-            x &= x - 1;
-            count++;
-        }
-    }
-    return count;
 }
 
 /* ------------------------------------------------------------------ */

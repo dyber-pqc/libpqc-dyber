@@ -16,6 +16,7 @@
 #include "core/kem/mlkem/reduce.h"
 #include "core/kem/mlkem/poly.h"
 #include "core/kem/mlkem/polyvec.h"
+#include "core/common/hash/sha3.h"
 
 static int test_kem_roundtrip(const char *alg_name) {
     PQC_KEM *kem = pqc_kem_new(alg_name);
@@ -229,7 +230,6 @@ static int test_polynomial_pipeline(void) {
 
     /* Test matrix generation: verify SHAKE-128 produces correct A coefficients */
     {
-        extern void pqc_shake128(uint8_t *out, size_t outlen, const uint8_t *in, size_t inlen);
         uint8_t test_rho[32];
         uint8_t shake_in[34];
         uint8_t shake_out[504];

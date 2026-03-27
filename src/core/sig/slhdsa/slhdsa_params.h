@@ -16,6 +16,14 @@
 extern "C" {
 #endif
 
+/* Suppress unused-variable warnings for static const parameter sets
+ * defined in this header (not all translation units use every set). */
+#if defined(__GNUC__) || defined(__clang__)
+#define SLHDSA_UNUSED __attribute__((unused))
+#else
+#define SLHDSA_UNUSED
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Hash mode identifiers                                                */
 /* ------------------------------------------------------------------ */
@@ -95,7 +103,7 @@ typedef struct {
  * n=32: len1=64, len2=3, len=67
  */
 
-static const slhdsa_params_t SLHDSA_SHA2_128S = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHA2_128S = {
     .name = "SLH-DSA-SHA2-128s",
     .hash_id = SLHDSA_HASH_SHA2,
     .n = 16, .h = 63, .d = 7, .hp = 9,
@@ -108,7 +116,7 @@ static const slhdsa_params_t SLHDSA_SHA2_128S = {
     .ht_sig_bytes = 4944,       /* 7*(9*16 + 560) */
 };
 
-static const slhdsa_params_t SLHDSA_SHA2_128F = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHA2_128F = {
     .name = "SLH-DSA-SHA2-128f",
     .hash_id = SLHDSA_HASH_SHA2,
     .n = 16, .h = 66, .d = 22, .hp = 3,
@@ -121,7 +129,7 @@ static const slhdsa_params_t SLHDSA_SHA2_128F = {
     .ht_sig_bytes = 13392,      /* 22*(3*16 + 560) */
 };
 
-static const slhdsa_params_t SLHDSA_SHA2_192S = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHA2_192S = {
     .name = "SLH-DSA-SHA2-192s",
     .hash_id = SLHDSA_HASH_SHA2,
     .n = 24, .h = 63, .d = 7, .hp = 9,
@@ -134,7 +142,7 @@ static const slhdsa_params_t SLHDSA_SHA2_192S = {
     .ht_sig_bytes = 10104,      /* 7*(9*24 + 1224) */
 };
 
-static const slhdsa_params_t SLHDSA_SHA2_192F = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHA2_192F = {
     .name = "SLH-DSA-SHA2-192f",
     .hash_id = SLHDSA_HASH_SHA2,
     .n = 24, .h = 66, .d = 22, .hp = 3,
@@ -147,7 +155,7 @@ static const slhdsa_params_t SLHDSA_SHA2_192F = {
     .ht_sig_bytes = 28512,      /* 22*(3*24 + 1224) */
 };
 
-static const slhdsa_params_t SLHDSA_SHA2_256S = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHA2_256S = {
     .name = "SLH-DSA-SHA2-256s",
     .hash_id = SLHDSA_HASH_SHA2,
     .n = 32, .h = 64, .d = 8, .hp = 8,
@@ -160,7 +168,7 @@ static const slhdsa_params_t SLHDSA_SHA2_256S = {
     .ht_sig_bytes = 19232,      /* 8*(8*32 + 2144) */
 };
 
-static const slhdsa_params_t SLHDSA_SHA2_256F = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHA2_256F = {
     .name = "SLH-DSA-SHA2-256f",
     .hash_id = SLHDSA_HASH_SHA2,
     .n = 32, .h = 68, .d = 17, .hp = 4,
@@ -175,7 +183,7 @@ static const slhdsa_params_t SLHDSA_SHA2_256F = {
 
 /* SHAKE parameter sets (same structure, different hash) */
 
-static const slhdsa_params_t SLHDSA_SHAKE_128S = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHAKE_128S = {
     .name = "SLH-DSA-SHAKE-128s",
     .hash_id = SLHDSA_HASH_SHAKE,
     .n = 16, .h = 63, .d = 7, .hp = 9,
@@ -188,7 +196,7 @@ static const slhdsa_params_t SLHDSA_SHAKE_128S = {
     .ht_sig_bytes = 4944,
 };
 
-static const slhdsa_params_t SLHDSA_SHAKE_128F = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHAKE_128F = {
     .name = "SLH-DSA-SHAKE-128f",
     .hash_id = SLHDSA_HASH_SHAKE,
     .n = 16, .h = 66, .d = 22, .hp = 3,
@@ -201,7 +209,7 @@ static const slhdsa_params_t SLHDSA_SHAKE_128F = {
     .ht_sig_bytes = 13392,
 };
 
-static const slhdsa_params_t SLHDSA_SHAKE_192S = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHAKE_192S = {
     .name = "SLH-DSA-SHAKE-192s",
     .hash_id = SLHDSA_HASH_SHAKE,
     .n = 24, .h = 63, .d = 7, .hp = 9,
@@ -214,7 +222,7 @@ static const slhdsa_params_t SLHDSA_SHAKE_192S = {
     .ht_sig_bytes = 10104,
 };
 
-static const slhdsa_params_t SLHDSA_SHAKE_192F = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHAKE_192F = {
     .name = "SLH-DSA-SHAKE-192f",
     .hash_id = SLHDSA_HASH_SHAKE,
     .n = 24, .h = 66, .d = 22, .hp = 3,
@@ -227,7 +235,7 @@ static const slhdsa_params_t SLHDSA_SHAKE_192F = {
     .ht_sig_bytes = 28512,
 };
 
-static const slhdsa_params_t SLHDSA_SHAKE_256S = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHAKE_256S = {
     .name = "SLH-DSA-SHAKE-256s",
     .hash_id = SLHDSA_HASH_SHAKE,
     .n = 32, .h = 64, .d = 8, .hp = 8,
@@ -240,7 +248,7 @@ static const slhdsa_params_t SLHDSA_SHAKE_256S = {
     .ht_sig_bytes = 19232,
 };
 
-static const slhdsa_params_t SLHDSA_SHAKE_256F = {
+SLHDSA_UNUSED static const slhdsa_params_t SLHDSA_SHAKE_256F = {
     .name = "SLH-DSA-SHAKE-256f",
     .hash_id = SLHDSA_HASH_SHAKE,
     .n = 32, .h = 68, .d = 17, .hp = 4,
