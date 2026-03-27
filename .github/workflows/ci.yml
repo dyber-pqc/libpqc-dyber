@@ -177,11 +177,11 @@ jobs:
             --show-leak-kinds=all \
             --track-origins=yes \
             --error-exitcode=1 \
-            ./build/tests/test_kem_all
+            ./build/tests/test_kem
           valgrind --tool=memcheck \
             --leak-check=full \
             --error-exitcode=1 \
-            ./build/tests/test_sig_all
+            ./build/tests/test_sig
           valgrind --tool=memcheck \
             --leak-check=full \
             --error-exitcode=1 \
@@ -205,11 +205,11 @@ jobs:
           valgrind --tool=memcheck \
             --track-origins=yes \
             --error-exitcode=1 \
-            ./build/tests/test_kem_all 2>&1 | tee ct_kem.log
+            ./build/tests/test_kem 2>&1 | tee ct_kem.log
           valgrind --tool=memcheck \
             --track-origins=yes \
             --error-exitcode=1 \
-            ./build/tests/test_sig_all 2>&1 | tee ct_sig.log
+            ./build/tests/test_sig 2>&1 | tee ct_sig.log
 
   fuzzing:
     name: Fuzz Testing
@@ -262,6 +262,8 @@ jobs:
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -271,9 +273,9 @@ jobs:
       - name: Run hash vector tests
         run: ./build/tests/test_hash
       - name: Run KEM round-trip tests
-        run: ./build/tests/test_kem_all
+        run: ./build/tests/test_kem
       - name: Run Signature round-trip tests
-        run: ./build/tests/test_sig_all
+        run: ./build/tests/test_sig
 
   benchmarks:
     name: Performance Benchmarks
@@ -281,6 +283,8 @@ jobs:
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build release
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -477,6 +481,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build with all algorithms disabled except ML-KEM
         run: |
           cmake -B build -G Ninja \
@@ -507,6 +513,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build static only
         run: |
           cmake -B build -G Ninja \
@@ -521,6 +529,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build without ASM
         run: |
           cmake -B build -G Ninja \

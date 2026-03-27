@@ -28,8 +28,8 @@ int16_t pqc_mlkem_montgomery_reduce(int32_t a)
 {
     int16_t t;
 
-    t = (int16_t)a * PQC_MLKEM_QINV;
-    t = (a - (int32_t)t * PQC_MLKEM_Q) >> 16;
+    t = (int16_t)((int16_t)a * (int16_t)PQC_MLKEM_QINV);
+    t = (int16_t)((a - (int32_t)t * PQC_MLKEM_Q) >> 16);
     return t;
 }
 
@@ -47,9 +47,9 @@ int16_t pqc_mlkem_montgomery_reduce(int32_t a)
 int16_t pqc_mlkem_barrett_reduce(int16_t a)
 {
     int16_t t;
-    const int16_t v = ((1 << 26) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q;
+    const int16_t v = (int16_t)(((1L << 26) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q);
 
-    t  = ((int32_t)v * a + (1 << 25)) >> 26;
-    t *= PQC_MLKEM_Q;
-    return a - t;
+    t  = (int16_t)(((int32_t)v * a + (1 << 25)) >> 26);
+    t  = (int16_t)(t * PQC_MLKEM_Q);
+    return (int16_t)(a - t);
 }

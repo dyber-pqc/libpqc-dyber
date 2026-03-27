@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
       - name: Build with ASan
         env:
           CC: clang
@@ -32,8 +34,8 @@ jobs:
           ASAN_OPTIONS: "detect_leaks=1:detect_stack_use_after_return=1:check_initialization_order=1"
         run: |
           ./build/tests/test_hash
-          ./build/tests/test_kem_all
-          ./build/tests/test_sig_all
+          ./build/tests/test_kem
+          ./build/tests/test_sig
           ./build/tests/test_integration
 
   ubsan-full:
@@ -41,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
       - name: Build with UBSan
         env:
           CC: clang
@@ -55,14 +59,16 @@ jobs:
           UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
         run: |
           ./build/tests/test_hash
-          ./build/tests/test_kem_all
-          ./build/tests/test_sig_all
+          ./build/tests/test_kem
+          ./build/tests/test_sig
 
   msan-full:
     name: MemorySanitizer
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
       - name: Build with MSan
         env:
           CC: clang
@@ -75,8 +81,8 @@ jobs:
       - name: Run tests under MSan
         run: |
           ./build/tests/test_hash
-          ./build/tests/test_kem_all
-          ./build/tests/test_sig_all
+          ./build/tests/test_kem
+          ./build/tests/test_sig
 
   # ============================================================
   # Valgrind Deep Analysis
@@ -102,12 +108,12 @@ jobs:
         run: |
           valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
             --track-origins=yes --error-exitcode=1 \
-            ./build/tests/test_kem_all
+            ./build/tests/test_kem
       - name: Memcheck Signature tests
         run: |
           valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
             --track-origins=yes --error-exitcode=1 \
-            ./build/tests/test_sig_all
+            ./build/tests/test_sig
 
   valgrind-callgrind:
     name: Valgrind Callgrind (Performance Profile)
@@ -154,11 +160,11 @@ jobs:
       - name: Verify constant-time KEM operations
         run: |
           valgrind --tool=memcheck --error-exitcode=1 \
-            ./build/tests/test_kem_all 2>&1
+            ./build/tests/test_kem 2>&1
       - name: Verify constant-time Signature operations
         run: |
           valgrind --tool=memcheck --error-exitcode=1 \
-            ./build/tests/test_sig_all 2>&1
+            ./build/tests/test_sig 2>&1
 
   # ============================================================
   # Static Analysis
@@ -220,6 +226,8 @@ jobs:
         compiler: [gcc, clang]
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
       - name: Build with -Werror
         run: |
           if [ "${{ matrix.compiler }}" = "clang" ]; then
@@ -245,6 +253,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build 1
         run: |
           cmake -B build1 -G Ninja -DCMAKE_BUILD_TYPE=Release

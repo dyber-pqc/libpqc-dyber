@@ -426,7 +426,7 @@ void pqc_mlkem_poly_basemul_montgomery(pqc_mlkem_poly *r,
 void pqc_mlkem_poly_tomont(pqc_mlkem_poly *r)
 {
     unsigned int i;
-    const int16_t f = (1ULL << 32) % PQC_MLKEM_Q;
+    const int16_t f = (int16_t)((1ULL << 32) % PQC_MLKEM_Q);
     for (i = 0; i < PQC_MLKEM_N; i++)
         r->coeffs[i] = pqc_mlkem_montgomery_reduce((int32_t)r->coeffs[i] * f);
 }

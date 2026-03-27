@@ -207,11 +207,13 @@ pqc_status_t pqc_mlkem_decaps(const pqc_mlkem_params_t *params,
     uint8_t buf[2 * PQC_MLKEM_SYMBYTES];
     uint8_t kr[2 * PQC_MLKEM_SYMBYTES]; /* will contain key, coins */
     uint8_t cmp[1568]; /* max ciphertext size (ML-KEM-1024) */
-    const uint8_t *pk = sk + params->indcpa_sk_bytes;
+    const uint8_t *pk;
 
     if (!params || !ss || !ct || !sk) {
         return PQC_ERROR_INVALID_ARGUMENT;
     }
+
+    pk = sk + params->indcpa_sk_bytes;
 
     /* Step 1: m' = indcpa_dec(ct, sk) */
     pqc_mlkem_indcpa_dec(buf, ct, sk, params);
