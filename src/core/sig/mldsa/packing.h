@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Key and signature serialization for ML-DSA (FIPS 204).
+ *
+ * Adapted from the reference pq-crystals/dilithium implementation
+ * (Public Domain / CC0).
  */
 
 #ifndef PQC_MLDSA_PACKING_H
@@ -62,19 +65,19 @@ void pqc_mldsa_unpack_pk(uint8_t rho[PQC_MLDSA_SEEDBYTES],
 
 void pqc_mldsa_pack_sk(uint8_t *sk,
                         const uint8_t rho[PQC_MLDSA_SEEDBYTES],
-                        const uint8_t K[PQC_MLDSA_SEEDBYTES],
                         const uint8_t tr[PQC_MLDSA_TRBYTES],
+                        const uint8_t K[PQC_MLDSA_SEEDBYTES],
+                        const pqc_mldsa_polyveck *t0,
                         const pqc_mldsa_polyvecl *s1,
                         const pqc_mldsa_polyveck *s2,
-                        const pqc_mldsa_polyveck *t0,
                         const pqc_mldsa_params_t *params);
 
 void pqc_mldsa_unpack_sk(uint8_t rho[PQC_MLDSA_SEEDBYTES],
-                          uint8_t K[PQC_MLDSA_SEEDBYTES],
                           uint8_t tr[PQC_MLDSA_TRBYTES],
+                          uint8_t K[PQC_MLDSA_SEEDBYTES],
+                          pqc_mldsa_polyveck *t0,
                           pqc_mldsa_polyvecl *s1,
                           pqc_mldsa_polyveck *s2,
-                          pqc_mldsa_polyveck *t0,
                           const uint8_t *sk,
                           const pqc_mldsa_params_t *params);
 

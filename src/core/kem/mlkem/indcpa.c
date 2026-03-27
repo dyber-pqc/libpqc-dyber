@@ -12,338 +12,376 @@
  *
  * The matrix A is generated from a seed rho using SHAKE-128 (XOF)
  * via rejection sampling (Algorithm 6 - SampleNTT).
+ *
+ * Based on the reference implementation from pq-crystals/kyber.
  */
 
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
-
+#include "core/kem/mlkem/mlkem_params.h"
 #include "core/kem/mlkem/indcpa.h"
-#include "core/kem/mlkem/poly.h"
 #include "core/kem/mlkem/polyvec.h"
-#include "core/kem/mlkem/cbd.h"
+#include "core/kem/mlkem/poly.h"
 #include "core/kem/mlkem/ntt.h"
-#include "core/kem/mlkem/reduce.h"
 #include "core/common/hash/sha3.h"
 
-/* ================================================================= */
-/*  Helper: pack / unpack public key                                   */
-/* ================================================================= */
+/* XOF block size for SHAKE-128 */
+#define PQC_MLKEM_XOF_BLOCKBYTES  PQC_SHAKE128_RATE
 
-static void pack_pk(uint8_t *pk,
-                    const pqc_mlkem_polyvec *t,
-                    const uint8_t rho[PQC_MLKEM_SYMBYTES],
+/*************************************************
+* Name:        pack_pk
+*
+* Description: Serialize the public key as concatenation of the
+*              serialized vector of polynomials pk
+*              and the public seed used to generate the matrix A.
+*
+* Arguments:   uint8_t *r: pointer to the output serialized public key
+*              pqc_mlkem_polyvec *pk: pointer to the input public-key polyvec
+*              const uint8_t *seed: pointer to the input public seed
+*              unsigned int k: module rank
+**************************************************/
+static void pack_pk(uint8_t *r,
+                    const pqc_mlkem_polyvec *pk,
+                    const uint8_t seed[PQC_MLKEM_SYMBYTES],
                     unsigned int k)
 {
-    pqc_mlkem_polyvec_tobytes(pk, t, k);
-    memcpy(pk + k * PQC_MLKEM_POLYBYTES, rho, PQC_MLKEM_SYMBYTES);
+    pqc_mlkem_polyvec_tobytes(r, pk, k);
+    memcpy(r + k * PQC_MLKEM_POLYBYTES, seed, PQC_MLKEM_SYMBYTES);
 }
 
-static void unpack_pk(pqc_mlkem_polyvec *t,
-                      uint8_t rho[PQC_MLKEM_SYMBYTES],
-                      const uint8_t *pk,
+/*************************************************
+* Name:        unpack_pk
+*
+* Description: De-serialize public key from a byte array;
+*              approximate inverse of pack_pk
+*
+* Arguments:   - pqc_mlkem_polyvec *pk: pointer to output public-key polynomial vector
+*              - uint8_t *seed: pointer to output seed to generate matrix A
+*              - const uint8_t *packedpk: pointer to input serialized public key
+*              - unsigned int k: module rank
+**************************************************/
+static void unpack_pk(pqc_mlkem_polyvec *pk,
+                      uint8_t seed[PQC_MLKEM_SYMBYTES],
+                      const uint8_t *packedpk,
                       unsigned int k)
 {
-    pqc_mlkem_polyvec_frombytes(t, pk, k);
-    memcpy(rho, pk + k * PQC_MLKEM_POLYBYTES, PQC_MLKEM_SYMBYTES);
+    pqc_mlkem_polyvec_frombytes(pk, packedpk, k);
+    memcpy(seed, packedpk + k * PQC_MLKEM_POLYBYTES, PQC_MLKEM_SYMBYTES);
 }
 
-static void pack_sk(uint8_t *sk,
-                    const pqc_mlkem_polyvec *s,
+/*************************************************
+* Name:        pack_sk
+*
+* Description: Serialize the secret key
+*
+* Arguments:   - uint8_t *r: pointer to output serialized secret key
+*              - pqc_mlkem_polyvec *sk: pointer to input vector of polynomials (secret key)
+*              - unsigned int k: module rank
+**************************************************/
+static void pack_sk(uint8_t *r,
+                    const pqc_mlkem_polyvec *sk,
                     unsigned int k)
 {
-    pqc_mlkem_polyvec_tobytes(sk, s, k);
+    pqc_mlkem_polyvec_tobytes(r, sk, k);
 }
 
-static void unpack_sk(pqc_mlkem_polyvec *s,
-                      const uint8_t *sk,
+/*************************************************
+* Name:        unpack_sk
+*
+* Description: De-serialize the secret key; inverse of pack_sk
+*
+* Arguments:   - pqc_mlkem_polyvec *sk: pointer to output vector of polynomials (secret key)
+*              - const uint8_t *packedsk: pointer to input serialized secret key
+*              - unsigned int k: module rank
+**************************************************/
+static void unpack_sk(pqc_mlkem_polyvec *sk,
+                      const uint8_t *packedsk,
                       unsigned int k)
 {
-    pqc_mlkem_polyvec_frombytes(s, sk, k);
+    pqc_mlkem_polyvec_frombytes(sk, packedsk, k);
 }
 
-static void pack_ciphertext(uint8_t *ct,
+/*************************************************
+* Name:        pack_ciphertext
+*
+* Description: Serialize the ciphertext as concatenation of the
+*              compressed and serialized vector of polynomials b
+*              and the compressed and serialized polynomial v
+*
+* Arguments:   uint8_t *r: pointer to the output serialized ciphertext
+*              pqc_mlkem_polyvec *b: pointer to the input vector of polynomials b
+*              pqc_mlkem_poly *v: pointer to the input polynomial v
+*              const pqc_mlkem_params_t *params: parameter set
+**************************************************/
+static void pack_ciphertext(uint8_t *r,
                             const pqc_mlkem_polyvec *b,
                             const pqc_mlkem_poly *v,
                             const pqc_mlkem_params_t *params)
 {
-    pqc_mlkem_polyvec_compress(ct, b, params->k, params->du);
-    pqc_mlkem_poly_compress(ct + params->polyvec_compressed, v, params->dv);
+    pqc_mlkem_polyvec_compress(r, b, params->k, params->du);
+    pqc_mlkem_poly_compress(r + params->polyvec_compressed, v, params->dv);
 }
 
+/*************************************************
+* Name:        unpack_ciphertext
+*
+* Description: De-serialize and decompress ciphertext from a byte array;
+*              approximate inverse of pack_ciphertext
+*
+* Arguments:   - pqc_mlkem_polyvec *b: pointer to the output vector of polynomials b
+*              - pqc_mlkem_poly *v: pointer to the output polynomial v
+*              - const uint8_t *c: pointer to the input serialized ciphertext
+*              - const pqc_mlkem_params_t *params: parameter set
+**************************************************/
 static void unpack_ciphertext(pqc_mlkem_polyvec *b,
                               pqc_mlkem_poly *v,
-                              const uint8_t *ct,
+                              const uint8_t *c,
                               const pqc_mlkem_params_t *params)
 {
-    pqc_mlkem_polyvec_decompress(b, ct, params->k, params->du);
-    pqc_mlkem_poly_decompress(v, ct + params->polyvec_compressed, params->dv);
+    pqc_mlkem_polyvec_decompress(b, c, params->k, params->du);
+    pqc_mlkem_poly_decompress(v, c + params->polyvec_compressed, params->dv);
 }
 
-/* ================================================================= */
-/*  SampleNTT: generate a polynomial in NTT domain via SHAKE-128       */
-/*  (Algorithm 6 in FIPS 203 - rejection sampling from XOF)            */
-/* ================================================================= */
-
-/*
- * Parse a SHAKE-128 stream into an NTT-domain polynomial using
- * rejection sampling: read 3-byte groups, extract two 12-bit
- * candidates, keep those < q.
- */
-static void gen_matrix_entry(pqc_mlkem_poly *a,
-                             const uint8_t rho[PQC_MLKEM_SYMBYTES],
-                             uint8_t x, uint8_t y)
+/*************************************************
+* Name:        rej_uniform
+*
+* Description: Run rejection sampling on uniform random bytes to generate
+*              uniform random integers mod q
+*
+* Arguments:   - int16_t *r: pointer to output buffer
+*              - unsigned int len: requested number of 16-bit integers (uniform mod q)
+*              - const uint8_t *buf: pointer to input buffer
+*              - unsigned int buflen: length of input buffer in bytes
+*
+* Returns number of sampled 16-bit integers (at most len)
+**************************************************/
+static unsigned int rej_uniform(int16_t *r,
+                                unsigned int len,
+                                const uint8_t *buf,
+                                unsigned int buflen)
 {
-    /*
-     * XOF input = rho || x || y  (34 bytes).
-     * We squeeze in blocks and rejection-sample.
-     */
-    pqc_shake128_ctx ctx;
-    uint8_t buf[PQC_SHAKE128_RATE * 2]; /* two blocks at a time */
-    unsigned int ctr, bufpos, buflen;
-    uint16_t d1, d2;
+    unsigned int ctr, pos;
+    uint16_t val0, val1;
 
-    pqc_shake128_init(&ctx);
-    pqc_shake128_absorb(&ctx, rho, PQC_MLKEM_SYMBYTES);
-    pqc_shake128_absorb(&ctx, &x, 1);
-    pqc_shake128_absorb(&ctx, &y, 1);
-    pqc_shake128_finalize(&ctx);
+    ctr = pos = 0;
+    while (ctr < len && pos + 3 <= buflen) {
+        val0 = ((buf[pos + 0] >> 0) | ((uint16_t)buf[pos + 1] << 8)) & 0xFFF;
+        val1 = ((buf[pos + 1] >> 4) | ((uint16_t)buf[pos + 2] << 4)) & 0xFFF;
+        pos += 3;
 
-    /* Initial squeeze */
-    buflen = sizeof(buf);
-    pqc_shake128_squeeze(&ctx, buf, buflen);
-    bufpos = 0;
-    ctr = 0;
-
-    while (ctr < PQC_MLKEM_N) {
-        if (bufpos + 3 > buflen) {
-            /* Squeeze another block */
-            buflen = PQC_SHAKE128_RATE;
-            pqc_shake128_squeeze(&ctx, buf, buflen);
-            bufpos = 0;
-        }
-
-        d1 = (uint16_t)(((uint16_t)buf[bufpos + 0] >> 0) |
-                         ((uint16_t)buf[bufpos + 1] << 8)) & 0xFFF;
-        d2 = (uint16_t)(((uint16_t)buf[bufpos + 1] >> 4) |
-                         ((uint16_t)buf[bufpos + 2] << 4)) & 0xFFF;
-        bufpos += 3;
-
-        if (d1 < PQC_MLKEM_Q) {
-            a->coeffs[ctr++] = (int16_t)d1;
-        }
-        if (ctr < PQC_MLKEM_N && d2 < PQC_MLKEM_Q) {
-            a->coeffs[ctr++] = (int16_t)d2;
-        }
+        if (val0 < PQC_MLKEM_Q)
+            r[ctr++] = val0;
+        if (ctr < len && val1 < PQC_MLKEM_Q)
+            r[ctr++] = val1;
     }
+
+    return ctr;
 }
 
 /*
- * Generate the full k x k matrix A (or its transpose) in NTT domain.
- * When transposed == 0, A[i][j] is sampled with XOF(rho, i, j).
- * When transposed != 0, A[i][j] is sampled with XOF(rho, j, i).
+ * Number of initial XOF blocks to squeeze for matrix generation.
+ * This ensures we almost always have enough samples in the first squeeze.
  */
-static void gen_matrix(pqc_mlkem_polyvec *a,
-                       const uint8_t rho[PQC_MLKEM_SYMBYTES],
-                       unsigned int k,
-                       int transposed)
+#define GEN_MATRIX_NBLOCKS \
+    ((12 * PQC_MLKEM_N / 8 * (1 << 12) / PQC_MLKEM_Q + PQC_MLKEM_XOF_BLOCKBYTES) / PQC_MLKEM_XOF_BLOCKBYTES)
+
+/*************************************************
+* Name:        pqc_mlkem_gen_matrix
+*
+* Description: Deterministically generate matrix A (or the transpose of A)
+*              from a seed. Entries of the matrix are polynomials that look
+*              uniformly random. Performs rejection sampling on output of
+*              a XOF (SHAKE-128).
+*
+* Arguments:   - pqc_mlkem_polyvec *a: pointer to output matrix A
+*              - const uint8_t *seed: pointer to input seed
+*              - unsigned int k: module rank
+*              - int transposed: boolean deciding whether A or A^T is generated
+**************************************************/
+void pqc_mlkem_gen_matrix(pqc_mlkem_polyvec *a,
+                           const uint8_t seed[PQC_MLKEM_SYMBYTES],
+                           unsigned int k,
+                           int transposed)
 {
-    unsigned int i, j;
+    unsigned int ctr, i, j;
+    unsigned int buflen;
+    uint8_t buf[GEN_MATRIX_NBLOCKS * PQC_MLKEM_XOF_BLOCKBYTES];
+    uint8_t extseed[PQC_MLKEM_SYMBYTES + 2];
+    pqc_shake128_ctx state;
+
+    memcpy(extseed, seed, PQC_MLKEM_SYMBYTES);
+
     for (i = 0; i < k; i++) {
         for (j = 0; j < k; j++) {
             if (transposed) {
-                gen_matrix_entry(&a[i].vec[j], rho, (uint8_t)j, (uint8_t)i);
+                extseed[PQC_MLKEM_SYMBYTES + 0] = (uint8_t)i;
+                extseed[PQC_MLKEM_SYMBYTES + 1] = (uint8_t)j;
             } else {
-                gen_matrix_entry(&a[i].vec[j], rho, (uint8_t)i, (uint8_t)j);
+                extseed[PQC_MLKEM_SYMBYTES + 0] = (uint8_t)j;
+                extseed[PQC_MLKEM_SYMBYTES + 1] = (uint8_t)i;
+            }
+
+            pqc_shake128_init(&state);
+            pqc_shake128_absorb(&state, extseed, sizeof(extseed));
+            pqc_shake128_finalize(&state);
+
+            pqc_shake128_squeeze(&state, buf, GEN_MATRIX_NBLOCKS * PQC_MLKEM_XOF_BLOCKBYTES);
+            buflen = GEN_MATRIX_NBLOCKS * PQC_MLKEM_XOF_BLOCKBYTES;
+            ctr = rej_uniform(a[i].vec[j].coeffs, PQC_MLKEM_N, buf, buflen);
+
+            while (ctr < PQC_MLKEM_N) {
+                pqc_shake128_squeeze(&state, buf, PQC_MLKEM_XOF_BLOCKBYTES);
+                buflen = PQC_MLKEM_XOF_BLOCKBYTES;
+                ctr += rej_uniform(a[i].vec[j].coeffs + ctr, PQC_MLKEM_N - ctr, buf, buflen);
             }
         }
     }
 }
 
-/* ================================================================= */
-/*  SamplePolyCBD: derive noise polynomial via PRF + CBD               */
-/*  (Algorithm 7 in FIPS 203)                                          */
-/* ================================================================= */
+#define gen_a(A, B, K)   pqc_mlkem_gen_matrix(A, B, K, 0)
+#define gen_at(A, B, K)  pqc_mlkem_gen_matrix(A, B, K, 1)
 
-/*
- * PRF_eta: SHAKE-256(sigma || nonce) -> 64*eta bytes
- * Then sample via CBD_eta.
- */
-static void sample_noise(pqc_mlkem_poly *r,
-                         const uint8_t sigma[PQC_MLKEM_SYMBYTES],
-                         uint8_t nonce,
-                         unsigned int eta)
-{
-    uint8_t buf[PQC_MLKEM_SYMBYTES + 1];
-    uint8_t extbuf[3 * 64]; /* max 64*eta = 64*3 = 192 */
-
-    memcpy(buf, sigma, PQC_MLKEM_SYMBYTES);
-    buf[PQC_MLKEM_SYMBYTES] = nonce;
-
-    pqc_shake256(extbuf, 64 * eta, buf, PQC_MLKEM_SYMBYTES + 1);
-    pqc_mlkem_cbd_eta(r, extbuf, eta);
-}
-
-/* ================================================================= */
-/*  K-PKE.KeyGen (Algorithm 12)                                        */
-/* ================================================================= */
-
-void pqc_mlkem_indcpa_keygen(uint8_t *pk,
-                              uint8_t *sk,
-                              const pqc_mlkem_params_t *params)
+/*************************************************
+* Name:        pqc_mlkem_indcpa_keypair_derand
+*
+* Description: Generates public and private key for the CPA-secure
+*              public-key encryption scheme underlying ML-KEM.
+*              Deterministic version using provided coins.
+*
+* Arguments:   - uint8_t *pk: pointer to output public key
+*              - uint8_t *sk: pointer to output private key
+*              - const uint8_t *coins: pointer to input randomness (32 bytes)
+*              - const pqc_mlkem_params_t *params: parameter set
+**************************************************/
+void pqc_mlkem_indcpa_keypair_derand(uint8_t *pk,
+                                      uint8_t *sk,
+                                      const uint8_t coins[PQC_MLKEM_SYMBYTES],
+                                      const pqc_mlkem_params_t *params)
 {
     unsigned int i;
     unsigned int k = params->k;
-    uint8_t buf[2 * PQC_MLKEM_SYMBYTES]; /* (rho, sigma) = G(d) */
-    uint8_t *rho, *sigma;
-    pqc_mlkem_polyvec a[PQC_MLKEM_K_MAX]; /* matrix A (row-major, NTT) */
-    pqc_mlkem_polyvec s, e, t;            /* secret, error, public     */
-    uint8_t d[PQC_MLKEM_SYMBYTES];
-    uint8_t g_input[PQC_MLKEM_SYMBYTES + 1];
+    uint8_t buf[2 * PQC_MLKEM_SYMBYTES];
+    const uint8_t *publicseed = buf;
+    const uint8_t *noiseseed = buf + PQC_MLKEM_SYMBYTES;
     uint8_t nonce = 0;
+    pqc_mlkem_polyvec a[PQC_MLKEM_K_MAX], e, pkpv, skpv;
 
-    /* Step 1: d <-$ B^32  (caller has already filled d via randombytes) */
-    /* In the FO transform (mlkem.c), d is passed in via sk generation.
-     * Here we generate it fresh -- the top-level keygen in mlkem.c
-     * does it differently (provides d as input). We generate d ourselves
-     * for a standalone K-PKE.KeyGen. */
-    pqc_shake256(d, PQC_MLKEM_SYMBYTES, pk, 0); /* placeholder: will be overwritten */
-
-    /* Actually, per FIPS 203 Algorithm 16 (ML-KEM.KeyGen_internal),
-     * d and z are provided.  The standalone K-PKE.KeyGen generates d
-     * randomly.  For the internal API, we receive the seed via the
-     * pk buffer (first 32 bytes) as a convention from mlkem.c. */
-
-    /* Read 32-byte seed from pk (set by mlkem.c keygen) */
-    memcpy(d, pk, PQC_MLKEM_SYMBYTES);
-
-    /* Step 2: (rho, sigma) = G(d || k) */
-    memcpy(g_input, d, PQC_MLKEM_SYMBYTES);
-    g_input[PQC_MLKEM_SYMBYTES] = (uint8_t)k;
-    pqc_sha3_512(buf, g_input, PQC_MLKEM_SYMBYTES + 1);
-    rho   = buf;
-    sigma = buf + PQC_MLKEM_SYMBYTES;
-
-    /* Step 3-4: Generate matrix A in NTT domain */
-    gen_matrix(a, rho, k, 0 /* not transposed */);
-
-    /* Step 5-8: Sample secret vector s */
-    for (i = 0; i < k; i++) {
-        sample_noise(&s.vec[i], sigma, nonce++, params->eta1);
+    /* (rho, sigma) = G(coins || k) */
+    {
+        uint8_t g_input[PQC_MLKEM_SYMBYTES + 1];
+        memcpy(g_input, coins, PQC_MLKEM_SYMBYTES);
+        g_input[PQC_MLKEM_SYMBYTES] = (uint8_t)k;
+        pqc_sha3_512(buf, g_input, PQC_MLKEM_SYMBYTES + 1);
     }
 
-    /* Step 9-12: Sample error vector e */
-    for (i = 0; i < k; i++) {
-        sample_noise(&e.vec[i], sigma, nonce++, params->eta1);
-    }
+    gen_a(a, publicseed, k);
 
-    /* Step 13: NTT(s) */
-    pqc_mlkem_polyvec_ntt(&s, k);
+    for (i = 0; i < k; i++)
+        pqc_mlkem_poly_getnoise_eta1(&skpv.vec[i], noiseseed, nonce++, params->eta1);
+    for (i = 0; i < k; i++)
+        pqc_mlkem_poly_getnoise_eta1(&e.vec[i], noiseseed, nonce++, params->eta1);
 
-    /* Step 14: NTT(e) */
+    pqc_mlkem_polyvec_ntt(&skpv, k);
     pqc_mlkem_polyvec_ntt(&e, k);
 
-    /* Step 15-17: t = A * s + e  (in NTT domain) */
+    /* matrix-vector multiplication */
     for (i = 0; i < k; i++) {
-        pqc_mlkem_polyvec_basemul_acc_montgomery(&t.vec[i], &a[i], &s, k);
-        pqc_mlkem_poly_tomont(&t.vec[i]);
-        pqc_mlkem_poly_add(&t.vec[i], &t.vec[i], &e.vec[i]);
-        pqc_mlkem_poly_reduce(&t.vec[i]);
+        pqc_mlkem_polyvec_basemul_acc_montgomery(&pkpv.vec[i], &a[i], &skpv, k);
+        pqc_mlkem_poly_tomont(&pkpv.vec[i]);
     }
 
-    /* Step 18-19: Pack keys */
-    pack_pk(pk, &t, rho, k);
-    pack_sk(sk, &s, k);
+    pqc_mlkem_polyvec_add(&pkpv, &pkpv, &e, k);
+    pqc_mlkem_polyvec_reduce(&pkpv, k);
+
+    pack_sk(sk, &skpv, k);
+    pack_pk(pk, &pkpv, publicseed, k);
 }
 
-/* ================================================================= */
-/*  K-PKE.Encrypt (Algorithm 13)                                       */
-/* ================================================================= */
-
-void pqc_mlkem_indcpa_enc(uint8_t *ct,
-                           const uint8_t msg[PQC_MLKEM_SYMBYTES],
+/*************************************************
+* Name:        pqc_mlkem_indcpa_enc
+*
+* Description: Encryption function of the CPA-secure
+*              public-key encryption scheme underlying ML-KEM.
+*
+* Arguments:   - uint8_t *c: pointer to output ciphertext
+*              - const uint8_t *m: pointer to input message
+*              - const uint8_t *pk: pointer to input public key
+*              - const uint8_t *coins: pointer to input random coins
+*              - const pqc_mlkem_params_t *params: parameter set
+**************************************************/
+void pqc_mlkem_indcpa_enc(uint8_t *c,
+                           const uint8_t m[PQC_MLKEM_SYMBYTES],
                            const uint8_t *pk,
                            const uint8_t coins[PQC_MLKEM_SYMBYTES],
                            const pqc_mlkem_params_t *params)
 {
     unsigned int i;
     unsigned int k = params->k;
-    uint8_t rho[PQC_MLKEM_SYMBYTES];
-    pqc_mlkem_polyvec a[PQC_MLKEM_K_MAX]; /* matrix A^T */
-    pqc_mlkem_polyvec t;                   /* public key vector */
-    pqc_mlkem_polyvec r, e1;               /* randomness, error1 */
-    pqc_mlkem_poly e2, v, mp;              /* error2, result, message poly */
-    pqc_mlkem_polyvec u;
+    uint8_t seed[PQC_MLKEM_SYMBYTES];
     uint8_t nonce = 0;
+    pqc_mlkem_polyvec sp, pkpv, ep, at[PQC_MLKEM_K_MAX], b;
+    pqc_mlkem_poly v, kk, epp;
 
-    /* Unpack public key */
-    unpack_pk(&t, rho, pk, k);
+    unpack_pk(&pkpv, seed, pk, k);
+    pqc_mlkem_poly_frommsg(&kk, m);
+    gen_at(at, seed, k);
 
-    /* Encode message as polynomial */
-    pqc_mlkem_poly_frommsg(&mp, msg);
+    for (i = 0; i < k; i++)
+        pqc_mlkem_poly_getnoise_eta1(sp.vec + i, coins, nonce++, params->eta1);
+    for (i = 0; i < k; i++)
+        pqc_mlkem_poly_getnoise_eta2(ep.vec + i, coins, nonce++);
+    pqc_mlkem_poly_getnoise_eta2(&epp, coins, nonce++);
 
-    /* Generate A^T (transposed) */
-    gen_matrix(a, rho, k, 1 /* transposed */);
+    pqc_mlkem_polyvec_ntt(&sp, k);
 
-    /* Sample r (secret randomness vector) */
-    for (i = 0; i < k; i++) {
-        sample_noise(&r.vec[i], coins, nonce++, params->eta1);
-    }
+    /* matrix-vector multiplication */
+    for (i = 0; i < k; i++)
+        pqc_mlkem_polyvec_basemul_acc_montgomery(&b.vec[i], &at[i], &sp, k);
 
-    /* Sample e1 (error vector) */
-    for (i = 0; i < k; i++) {
-        sample_noise(&e1.vec[i], coins, nonce++, params->eta2);
-    }
+    pqc_mlkem_polyvec_basemul_acc_montgomery(&v, &pkpv, &sp, k);
 
-    /* Sample e2 (error scalar polynomial) */
-    sample_noise(&e2, coins, nonce++, params->eta2);
-
-    /* NTT(r) */
-    pqc_mlkem_polyvec_ntt(&r, k);
-
-    /* u = NTT^{-1}(A^T * NTT(r)) + e1 */
-    for (i = 0; i < k; i++) {
-        pqc_mlkem_polyvec_basemul_acc_montgomery(&u.vec[i], &a[i], &r, k);
-        pqc_mlkem_poly_invntt(&u.vec[i]);
-    }
-    pqc_mlkem_polyvec_add(&u, &u, &e1, k);
-    pqc_mlkem_polyvec_reduce(&u, k);
-
-    /* v = NTT^{-1}(t^T * NTT(r)) + e2 + Decompress_1(m) */
-    pqc_mlkem_polyvec_basemul_acc_montgomery(&v, &t, &r, k);
+    pqc_mlkem_polyvec_invntt(&b, k);
     pqc_mlkem_poly_invntt(&v);
-    pqc_mlkem_poly_add(&v, &v, &e2);
-    pqc_mlkem_poly_add(&v, &v, &mp);
+
+    pqc_mlkem_polyvec_add(&b, &b, &ep, k);
+    pqc_mlkem_poly_add(&v, &v, &epp);
+    pqc_mlkem_poly_add(&v, &v, &kk);
+    pqc_mlkem_polyvec_reduce(&b, k);
     pqc_mlkem_poly_reduce(&v);
 
-    /* Pack ciphertext */
-    pack_ciphertext(ct, &u, &v, params);
+    pack_ciphertext(c, &b, &v, params);
 }
 
-/* ================================================================= */
-/*  K-PKE.Decrypt (Algorithm 14)                                       */
-/* ================================================================= */
-
-void pqc_mlkem_indcpa_dec(uint8_t msg[PQC_MLKEM_SYMBYTES],
-                           const uint8_t *ct,
+/*************************************************
+* Name:        pqc_mlkem_indcpa_dec
+*
+* Description: Decryption function of the CPA-secure
+*              public-key encryption scheme underlying ML-KEM.
+*
+* Arguments:   - uint8_t *m: pointer to output decrypted message
+*              - const uint8_t *c: pointer to input ciphertext
+*              - const uint8_t *sk: pointer to input secret key
+*              - const pqc_mlkem_params_t *params: parameter set
+**************************************************/
+void pqc_mlkem_indcpa_dec(uint8_t m[PQC_MLKEM_SYMBYTES],
+                           const uint8_t *c,
                            const uint8_t *sk,
                            const pqc_mlkem_params_t *params)
 {
     unsigned int k = params->k;
-    pqc_mlkem_polyvec u, s;
+    pqc_mlkem_polyvec b, skpv;
     pqc_mlkem_poly v, mp;
 
-    /* Unpack */
-    unpack_ciphertext(&u, &v, ct, params);
-    unpack_sk(&s, sk, k);
+    unpack_ciphertext(&b, &v, c, params);
+    unpack_sk(&skpv, sk, k);
 
-    /* NTT(u) */
-    pqc_mlkem_polyvec_ntt(&u, k);
-
-    /* mp = v - NTT^{-1}(s^T * NTT(u)) */
-    pqc_mlkem_polyvec_basemul_acc_montgomery(&mp, &s, &u, k);
+    pqc_mlkem_polyvec_ntt(&b, k);
+    pqc_mlkem_polyvec_basemul_acc_montgomery(&mp, &skpv, &b, k);
     pqc_mlkem_poly_invntt(&mp);
+
     pqc_mlkem_poly_sub(&mp, &v, &mp);
     pqc_mlkem_poly_reduce(&mp);
 
-    /* Encode as message */
-    pqc_mlkem_poly_tomsg(msg, &mp);
+    pqc_mlkem_poly_tomsg(m, &mp);
 }

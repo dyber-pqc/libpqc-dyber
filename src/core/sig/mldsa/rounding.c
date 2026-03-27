@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Rounding and decomposition for ML-DSA (FIPS 204).
+ *
+ * Adapted from the reference pq-crystals/dilithium implementation
+ * (Public Domain / CC0).
  */
 
 #include "core/sig/mldsa/rounding.h"
@@ -11,6 +14,8 @@
 
 /* ------------------------------------------------------------------ */
 /* Power2Round (Algorithm 35 in FIPS 204)                               */
+/* For a mod^+ q, compute a0, a1 such that a = a1*2^D + a0             */
+/* with -2^{D-1} < a0 <= 2^{D-1}.                                      */
 /* ------------------------------------------------------------------ */
 
 int32_t pqc_mldsa_power2round(int32_t *a0, int32_t a)
@@ -24,6 +29,9 @@ int32_t pqc_mldsa_power2round(int32_t *a0, int32_t a)
 
 /* ------------------------------------------------------------------ */
 /* Decompose (Algorithm 36 in FIPS 204)                                 */
+/* For a mod^+ q, compute a1, a0 such that                              */
+/* a = a1 * ALPHA + a0, with -ALPHA/2 < a0 <= ALPHA/2                   */
+/* where ALPHA = 2*gamma2.                                               */
 /* ------------------------------------------------------------------ */
 
 int32_t pqc_mldsa_decompose(int32_t *a0, int32_t a, int32_t gamma2)

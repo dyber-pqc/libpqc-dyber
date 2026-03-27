@@ -5,6 +5,8 @@
  *
  * Modular arithmetic helpers for ML-KEM (FIPS 203).
  * Barrett and Montgomery reductions modulo q = 3329.
+ *
+ * Based on the reference implementation from pq-crystals/kyber.
  */
 
 #ifndef PQC_MLKEM_REDUCE_H
@@ -16,30 +18,24 @@
 extern "C" {
 #endif
 
-#define PQC_MLKEM_Q         3329
-#define PQC_MLKEM_MONT      (-1044)  /* 2^16 mod q  (== 3329 - 1044 = 2285 unsigned) */
-#define PQC_MLKEM_QINV      62209    /* q^{-1} mod 2^16 */
-
-/**
- * Barrett reduction.
- *
- * For any 16-bit signed integer @p a with |a| < 2^15, returns
- * a value r congruent to a mod q in {0, ..., q-1}.
- *
- * Uses the approximation floor(a / q) ~ (a * v) >> 26
- * where v = floor(2^26 / q) + 1 = 20159.
- */
-int16_t pqc_mlkem_barrett_reduce(int16_t a);
+#define PQC_MLKEM_MONT  (-1044) /* 2^16 mod q */
+#define PQC_MLKEM_QINV  (-3327) /* q^{-1} mod 2^16 */
 
 /**
  * Montgomery reduction.
  *
- * Given a 32-bit integer @p a, computes 16-bit integer congruent to
- * a * 2^{-16} (mod q).
- *
- * Requires |a| <= q * 2^15.
+ * Given a 32-bit integer a, computes 16-bit integer congruent to
+ * a * R^{-1} (mod q), where R = 2^16.
  */
 int16_t pqc_mlkem_montgomery_reduce(int32_t a);
+
+/**
+ * Barrett reduction.
+ *
+ * For a 16-bit signed integer a, returns a centered representative
+ * congruent to a mod q in {-(q-1)/2, ..., (q-1)/2}.
+ */
+int16_t pqc_mlkem_barrett_reduce(int16_t a);
 
 #ifdef __cplusplus
 }

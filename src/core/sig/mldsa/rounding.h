@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Rounding and decomposition for ML-DSA (FIPS 204).
+ *
+ * Adapted from the reference pq-crystals/dilithium implementation
+ * (Public Domain / CC0).
  */
 
 #ifndef PQC_MLDSA_ROUNDING_H

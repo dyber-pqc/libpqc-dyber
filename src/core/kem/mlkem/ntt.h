@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Number Theoretic Transform (NTT) for ML-KEM (FIPS 203).
- * Operates on polynomials of degree < 256 in Z_q[X], q = 3329,
- * primitive 256th root of unity zeta = 17.
+ * Operates on polynomials of degree < 256 in Z_q[X], q = 3329.
+ *
+ * Based on the reference implementation from pq-crystals/kyber.
  */
 
 #ifndef PQC_MLKEM_NTT_H
@@ -29,18 +30,15 @@ extern const int16_t pqc_mlkem_zetas[128];
  * In-place transformation of 256 coefficients.
  * Input coefficients are assumed to be in normal domain,
  * output is in the NTT domain (bit-reversed order).
- *
- * Input bounds: |r[i]| < q  for all i.
  */
 void pqc_mlkem_ntt(int16_t r[256]);
 
 /**
  * Inverse NTT.
  *
- * In-place transformation from NTT domain back to normal domain.
- * Includes the multiplication by n^{-1} = 128^{-1} mod q.
- *
- * Output bounds: |r[i]| < q  for all i.
+ * In-place transformation from NTT domain back to normal domain,
+ * with multiplication by Montgomery factor 2^16.
+ * Input is in bitreversed order, output is in standard order.
  */
 void pqc_mlkem_invntt(int16_t r[256]);
 
@@ -48,8 +46,8 @@ void pqc_mlkem_invntt(int16_t r[256]);
  * Multiplication of two NTT-domain elements in a single
  * degree-1 base case (two coefficients).
  *
- * Computes  r0 = a0*b0 + a1*b1*zeta,  r1 = a0*b1 + a1*b0
- * where zeta is the twiddle factor for this base case.
+ * Computes  r[0] = a[0]*b[0] + a[1]*b[1]*zeta
+ *           r[1] = a[0]*b[1] + a[1]*b[0]
  * All arithmetic in Montgomery domain.
  */
 void pqc_mlkem_basemul(int16_t r[2],
