@@ -218,37 +218,35 @@ static void rs_forney(hqc_gf_t *error_values, const uint32_t *error_pos,
 {
     uint32_t ord = (1u << m) - 1;
 
-    /* Compute error evaluator polynomial omega(x) = S(x)*sigma(x) mod x^{2t} */
+    /*
+     * Compute error evaluator polynomial:
+     * omega(x) = (S(x) * sigma(x)) mod x^{g_deg}
+     * where S(x) = S_0 + S_1*x + ... + S_{g_deg-1}*x^{g_deg-1}
+     * (syndromes[i] = S_{i+1} in standard notation, but here syndromes[i] = S_i)
+     *
+     * Note: syndromes[] is 0-indexed: syndromes[0] = S_1, syndromes[1] = S_2, etc.
+     * We define S(x) = syndromes[0] + syndromes[1]*x + ... + syndromes[g_deg-1]*x^{g_deg-1}
+     */
     hqc_gf_t omega[RS_MAX_G + 1];
     memset(omega, 0, sizeof(omega));
     for (uint32_t i = 0; i < g_deg; i++) {
         hqc_gf_t val = 0;
-        for (uint32_t j = 0; j <= i; j++) {
-            if (j <= num_errors && (i - j) < g_deg) {
-                hqc_gf_t s = (i - j == 0) ? 0 : syndromes[i - j - 1];
-                if (j == 0) s = syndromes[i];
-                /* omega_i = sum_{j} sigma_j * S_{i-j} */
-            }
-        }
-        /* Simpler: direct computation */
-        for (uint32_t j = 0; j <= num_errors && j <= i + 1; j++) {
-            hqc_gf_t sval;
-            if (i >= j && (i - j) < g_deg) {
-                sval = syndromes[i - j];
-            } else {
-                sval = 0;
-            }
-            val ^= hqc_gf_mul(sigma[j], sval, m);
+        for (uint32_t j = 0; j <= num_errors && j <= i; j++) {
+            /* omega_i = sum_{j=0..min(i, deg(sigma))} sigma[j] * S_{i-j}
+             * where S_0 is defined as syndromes[0], S_1 = syndromes[1], etc. */
+            val ^= hqc_gf_mul(sigma[j], syndromes[i - j], m);
         }
         omega[i] = val;
     }
 
     /* For each error position, compute error value using Forney formula:
-     * e_k = - omega(X_k^{-1}) / sigma'(X_k^{-1})
+     * e_k = X_k * omega(X_k^{-1}) / sigma'(X_k^{-1})
      * where X_k = alpha^{pos_k}
+     * (In char 2, negation is identity, so no minus sign needed.)
      */
     for (uint32_t k = 0; k < num_errors; k++) {
         uint32_t pos = error_pos[k];
+        hqc_gf_t x_k = hqc_gf_exp(pos, m);
         hqc_gf_t x_inv = hqc_gf_exp(ord - (pos % ord), m);
 
         /* Evaluate omega at x_inv */
@@ -261,21 +259,24 @@ static void rs_forney(hqc_gf_t *error_values, const uint32_t *error_pos,
             x_pow = hqc_gf_mul(x_pow, x_inv, m);
         }
 
-        /* Evaluate formal derivative sigma'(x) at x_inv
-         * sigma'(x) = sum of sigma[i]*x^{i-1} for odd i */
+        /* Evaluate formal derivative sigma'(x) at x_inv.
+         * sigma'(x) = sum_{odd i} sigma[i] * x^{i-1}
+         * In GF(2^m), the derivative only has odd-indexed terms since
+         * even coefficients vanish (char 2). */
         hqc_gf_t sigma_deriv = 0;
-        x_pow = 1;
+        x_pow = 1;  /* x_inv^0 for i=1 term */
         for (uint32_t i = 1; i <= num_errors; i += 2) {
             if (sigma[i]) {
                 sigma_deriv ^= hqc_gf_mul(sigma[i], x_pow, m);
             }
-            /* Skip x^1 for next odd term */
+            /* Next odd term: i+2, so x^{(i+2)-1} = x^{i+1} = x_pow * x_inv^2 */
             x_pow = hqc_gf_mul(x_pow, hqc_gf_mul(x_inv, x_inv, m), m);
         }
 
         if (sigma_deriv != 0) {
-            error_values[k] = hqc_gf_mul(omega_val,
-                                          hqc_gf_inv(sigma_deriv, m), m);
+            /* e_k = X_k * omega(X_k^{-1}) / sigma'(X_k^{-1}) */
+            hqc_gf_t num = hqc_gf_mul(x_k, omega_val, m);
+            error_values[k] = hqc_gf_mul(num, hqc_gf_inv(sigma_deriv, m), m);
         } else {
             error_values[k] = 0;
         }
