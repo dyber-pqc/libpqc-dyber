@@ -1,1 +1,0 @@
-/usr/bin/cc -g -Wl,-z,relro,-z,now CMakeFiles/test_hash.dir/unit/test_hash.c.o -o test_hash  ../libpqc.a -lm 

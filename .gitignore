@@ -75,3 +75,5 @@ coverage/
 # Doxygen
 docs/api/html/
 docs/api/latex/
+build-wsl/
+build-asan/
