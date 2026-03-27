@@ -152,7 +152,7 @@ void pqc_mlkem_poly_compress(uint8_t *buf,
             for (j = 0; j < 2; j++) {
                 int16_t u = p->coeffs[2 * i + j];
                 u += (u >> 15) & PQC_MLKEM_Q;
-                t[j] = (uint16_t)(((uint32_t)u << 4) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q;
+                t[j] = (uint16_t)((((uint32_t)u << 4) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q);
                 t[j] &= 0xF;
             }
             buf[i] = (uint8_t)(t[0] | (t[1] << 4));
@@ -162,7 +162,7 @@ void pqc_mlkem_poly_compress(uint8_t *buf,
             for (j = 0; j < 8; j++) {
                 int16_t u = p->coeffs[8 * i + j];
                 u += (u >> 15) & PQC_MLKEM_Q;
-                t[j] = (uint16_t)(((uint32_t)u << 5) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q;
+                t[j] = (uint16_t)((((uint32_t)u << 5) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q);
                 t[j] &= 0x1F;
             }
             buf[5 * i + 0] = (uint8_t)( t[0]       | (t[1] << 5));
@@ -176,7 +176,7 @@ void pqc_mlkem_poly_compress(uint8_t *buf,
             for (j = 0; j < 4; j++) {
                 int16_t u = p->coeffs[4 * i + j];
                 u += (u >> 15) & PQC_MLKEM_Q;
-                t[j] = (uint16_t)(((uint32_t)u << 10) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q;
+                t[j] = (uint16_t)((((uint32_t)u << 10) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q);
                 t[j] &= 0x3FF;
             }
             buf[5 * i + 0] = (uint8_t)(t[0] >> 0);
@@ -190,7 +190,7 @@ void pqc_mlkem_poly_compress(uint8_t *buf,
             for (j = 0; j < 8; j++) {
                 int16_t u = p->coeffs[8 * i + j];
                 u += (u >> 15) & PQC_MLKEM_Q;
-                t[j] = (uint16_t)(((uint32_t)u << 11) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q;
+                t[j] = (uint16_t)((((uint32_t)u << 11) + PQC_MLKEM_Q / 2) / PQC_MLKEM_Q);
                 t[j] &= 0x7FF;
             }
             buf[11 * i +  0] = (uint8_t)(t[0] >>  0);

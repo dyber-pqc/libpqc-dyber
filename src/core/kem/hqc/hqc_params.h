@@ -37,21 +37,21 @@
 #define HQC_128_PARAM_W          66
 #define HQC_128_PARAM_WR         77
 #define HQC_128_PARAM_WE         77
-#define HQC_128_PARAM_DELTA      17
-#define HQC_128_PARAM_M          (HQC_128_PARAM_DELTA + 1)
-#define HQC_128_PARAM_GF_MUL_ORDER  ((1 << HQC_128_PARAM_M) - 1)
-#define HQC_128_PARAM_K          (HQC_128_PARAM_N1 - 2 * HQC_128_PARAM_DELTA)
+#define HQC_128_PARAM_DELTA      15
+#define HQC_128_PARAM_M          8   /* RS over GF(2^8) */
+#define HQC_128_PARAM_GF_MUL_ORDER  255
+#define HQC_128_PARAM_K          16
 #define HQC_128_PARAM_G          (2 * HQC_128_PARAM_DELTA)
 #define HQC_128_PARAM_FFT        8
 
 /* Byte sizes for HQC-128 */
 #define HQC_128_N_BYTES          ((HQC_128_PARAM_N + 7) / 8)
 #define HQC_128_N1N2_BYTES       ((HQC_128_PARAM_N1N2 + 7) / 8)
-#define HQC_128_K_BYTES          ((HQC_128_PARAM_K * 8 + 7) / 8)
+#define HQC_128_K_BYTES          HQC_128_PARAM_K
 #define HQC_128_INFO_BYTES       (HQC_128_K_BYTES)
-#define HQC_128_PK_BYTES         2249
-#define HQC_128_SK_BYTES         2289
-#define HQC_128_CT_BYTES         4481
+#define HQC_128_PK_BYTES         (HQC_SEED_BYTES + HQC_128_N_BYTES)
+#define HQC_128_SK_BYTES         (HQC_SEED_BYTES + HQC_128_PK_BYTES)
+#define HQC_128_CT_BYTES         (HQC_128_N_BYTES + HQC_128_N1N2_BYTES + HQC_SALT_SIZE_BYTES)
 
 /* ------------------------------------------------------------------ */
 /* HQC-192 parameters (NIST Level 3)                                    */
@@ -64,21 +64,21 @@
 #define HQC_192_PARAM_W          100
 #define HQC_192_PARAM_WR         117
 #define HQC_192_PARAM_WE         117
-#define HQC_192_PARAM_DELTA      24
-#define HQC_192_PARAM_M          (HQC_192_PARAM_DELTA + 1)
-#define HQC_192_PARAM_GF_MUL_ORDER  ((1 << HQC_192_PARAM_M) - 1)
-#define HQC_192_PARAM_K          (HQC_192_PARAM_N1 - 2 * HQC_192_PARAM_DELTA)
+#define HQC_192_PARAM_DELTA      16
+#define HQC_192_PARAM_M          8   /* RS over GF(2^8) */
+#define HQC_192_PARAM_GF_MUL_ORDER  255
+#define HQC_192_PARAM_K          24
 #define HQC_192_PARAM_G          (2 * HQC_192_PARAM_DELTA)
 #define HQC_192_PARAM_FFT        8
 
 /* Byte sizes for HQC-192 */
 #define HQC_192_N_BYTES          ((HQC_192_PARAM_N + 7) / 8)
 #define HQC_192_N1N2_BYTES       ((HQC_192_PARAM_N1N2 + 7) / 8)
-#define HQC_192_K_BYTES          ((HQC_192_PARAM_K * 8 + 7) / 8)
+#define HQC_192_K_BYTES          HQC_192_PARAM_K
 #define HQC_192_INFO_BYTES       (HQC_192_K_BYTES)
-#define HQC_192_PK_BYTES         4522
-#define HQC_192_SK_BYTES         4562
-#define HQC_192_CT_BYTES         9026
+#define HQC_192_PK_BYTES         (HQC_SEED_BYTES + HQC_192_N_BYTES)
+#define HQC_192_SK_BYTES         (HQC_SEED_BYTES + HQC_192_PK_BYTES)
+#define HQC_192_CT_BYTES         (HQC_192_N_BYTES + HQC_192_N1N2_BYTES + HQC_SALT_SIZE_BYTES)
 
 /* ------------------------------------------------------------------ */
 /* HQC-256 parameters (NIST Level 5)                                    */
@@ -92,20 +92,20 @@
 #define HQC_256_PARAM_WR         153
 #define HQC_256_PARAM_WE         153
 #define HQC_256_PARAM_DELTA      29
-#define HQC_256_PARAM_M          (HQC_256_PARAM_DELTA + 1)
-#define HQC_256_PARAM_GF_MUL_ORDER  ((1 << HQC_256_PARAM_M) - 1)
-#define HQC_256_PARAM_K          (HQC_256_PARAM_N1 - 2 * HQC_256_PARAM_DELTA)
+#define HQC_256_PARAM_M          8   /* RS over GF(2^8) */
+#define HQC_256_PARAM_GF_MUL_ORDER  255
+#define HQC_256_PARAM_K          32
 #define HQC_256_PARAM_G          (2 * HQC_256_PARAM_DELTA)
 #define HQC_256_PARAM_FFT        8
 
 /* Byte sizes for HQC-256 */
 #define HQC_256_N_BYTES          ((HQC_256_PARAM_N + 7) / 8)
 #define HQC_256_N1N2_BYTES       ((HQC_256_PARAM_N1N2 + 7) / 8)
-#define HQC_256_K_BYTES          ((HQC_256_PARAM_K * 8 + 7) / 8)
+#define HQC_256_K_BYTES          HQC_256_PARAM_K
 #define HQC_256_INFO_BYTES       (HQC_256_K_BYTES)
-#define HQC_256_PK_BYTES         7245
-#define HQC_256_SK_BYTES         7285
-#define HQC_256_CT_BYTES         14469
+#define HQC_256_PK_BYTES         (HQC_SEED_BYTES + HQC_256_N_BYTES)
+#define HQC_256_SK_BYTES         (HQC_SEED_BYTES + HQC_256_PK_BYTES)
+#define HQC_256_CT_BYTES         (HQC_256_N_BYTES + HQC_256_N1N2_BYTES + HQC_SALT_SIZE_BYTES)
 
 /* ------------------------------------------------------------------ */
 /* Maximum parameter sizes (for stack allocation)                       */
@@ -118,9 +118,9 @@
 #define HQC_MAX_N1N2             HQC_256_PARAM_N1N2
 #define HQC_MAX_N1N2_BYTES       HQC_256_N1N2_BYTES
 #define HQC_MAX_DELTA            HQC_256_PARAM_DELTA
-#define HQC_MAX_M                HQC_256_PARAM_M
+#define HQC_MAX_M                8
 #define HQC_MAX_K                HQC_256_PARAM_K
-#define HQC_MAX_GF_MUL_ORDER    HQC_256_PARAM_GF_MUL_ORDER
+#define HQC_MAX_GF_MUL_ORDER    255
 #define HQC_MAX_PK_BYTES        HQC_256_PK_BYTES
 #define HQC_MAX_SK_BYTES        HQC_256_SK_BYTES
 #define HQC_MAX_CT_BYTES        HQC_256_CT_BYTES
@@ -151,10 +151,8 @@ typedef struct {
     uint16_t gf_poly;    /* Irreducible polynomial for GF(2^m) */
 } hqc_params_t;
 
-/* Irreducible polynomials for GF(2^m) */
-#define HQC_GF_POLY_M18   0x43801u  /* x^18 + x^13 + x^12 + x^11 + 1 */
-#define HQC_GF_POLY_M25   0x2000023u /* x^25 + x^5 + x + 1 (approx) */
-#define HQC_GF_POLY_M30   0x40000007u /* x^30 + x^2 + x + 1 */
+/* Irreducible polynomial for GF(2^8): x^8 + x^4 + x^3 + x^2 + 1 */
+#define HQC_GF_POLY_M8    0x11Du
 
 static inline void hqc_params_init_128(hqc_params_t *p)
 {
@@ -176,7 +174,7 @@ static inline void hqc_params_init_128(hqc_params_t *p)
     p->pk_bytes = HQC_128_PK_BYTES;
     p->sk_bytes = HQC_128_SK_BYTES;
     p->ct_bytes = HQC_128_CT_BYTES;
-    p->gf_poly = 0x43;  /* x^8 + x^6 + x + 1 -- used for RM GF(2^8) sub-ops */
+    p->gf_poly = HQC_GF_POLY_M8;  /* x^8 + x^4 + x^3 + x^2 + 1 */
 }
 
 static inline void hqc_params_init_192(hqc_params_t *p)
@@ -199,7 +197,7 @@ static inline void hqc_params_init_192(hqc_params_t *p)
     p->pk_bytes = HQC_192_PK_BYTES;
     p->sk_bytes = HQC_192_SK_BYTES;
     p->ct_bytes = HQC_192_CT_BYTES;
-    p->gf_poly = 0x43;
+    p->gf_poly = HQC_GF_POLY_M8;
 }
 
 static inline void hqc_params_init_256(hqc_params_t *p)
@@ -222,7 +220,7 @@ static inline void hqc_params_init_256(hqc_params_t *p)
     p->pk_bytes = HQC_256_PK_BYTES;
     p->sk_bytes = HQC_256_SK_BYTES;
     p->ct_bytes = HQC_256_CT_BYTES;
-    p->gf_poly = 0x43;
+    p->gf_poly = HQC_GF_POLY_M8;
 }
 
 #endif /* PQC_HQC_PARAMS_H */
