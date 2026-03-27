@@ -119,7 +119,11 @@
       "Bash(gh run:*)",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(f''''{r[id]} {r[name]} {r[conclusion]}''''\\) for r in d.get\\(''''workflow_runs'''',[]\\)]\")",
       "WebFetch(domain:github.com)",
-      "Bash(cmake -B build_check -G \"Visual Studio 17 2022\" -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON)"
+      "Bash(cmake -B build_check -G \"Visual Studio 17 2022\" -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON)",
+      "Bash(for func:*)",
+      "Bash(do echo:*)",
+      "Bash(grep -l 'int $func' H:libpqc-dyber/src/core/sig/*.c)",
+      "Bash(done)"
     ]
   }
 }

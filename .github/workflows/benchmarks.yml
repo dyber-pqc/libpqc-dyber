@@ -95,7 +95,7 @@ jobs:
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
             -DPQC_BUILD_BENCHMARKS=ON \
-            -DPQC_BUILD_TESTS=OFF
+            -DPQC_BUILD_TESTS=ON
 
       - name: Configure (Windows MSVC)
         if: runner.os == 'Windows' && matrix.compiler == 'msvc'
@@ -103,7 +103,7 @@ jobs:
           cmake -B build -G "Ninja" `
             -DCMAKE_BUILD_TYPE=Release `
             -DPQC_BUILD_BENCHMARKS=ON `
-            -DPQC_BUILD_TESTS=OFF
+            -DPQC_BUILD_TESTS=ON
 
       - name: Configure (Windows Clang)
         if: runner.os == 'Windows' && matrix.compiler == 'clang'
@@ -113,7 +113,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang `
             -DCMAKE_CXX_COMPILER=clang++ `
             -DPQC_BUILD_BENCHMARKS=ON `
-            -DPQC_BUILD_TESTS=OFF
+            -DPQC_BUILD_TESTS=ON
 
       - name: Build benchmarks
         run: cmake --build build --config Release --target bench_all bench_kem bench_sig bench_hash
