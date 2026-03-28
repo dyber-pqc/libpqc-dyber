@@ -101,7 +101,6 @@ int ntru_owcpa_keygen(uint8_t *pk, uint8_t *sk,
     /* Pack secret key: f (trits) || h (q-coeffs) || f_inv_3 (trits) */
     int f_trit_bytes = (p->n + 4) / 5;
     int h_q_bytes = (p->n * p->log_q + 7) / 8;
-    int f3_trit_bytes = (p->n + 4) / 5;
 
     ntru_poly_t f_trits;
     ntru_poly_zero(&f_trits);

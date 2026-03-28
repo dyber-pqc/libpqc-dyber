@@ -28,7 +28,6 @@
 static void benes_layer(const uint8_t *bits, uint8_t *r, int lgs, int layer)
 {
     int n = 1 << lgs;
-    int half = n >> 1;
     int stride;
     int bit_idx = 0;
 

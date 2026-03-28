@@ -201,10 +201,8 @@ static pqc_status_t uov_sign_impl(uint8_t *sig, size_t *siglen,
     int o = params->o;
     int m = o;  /* m = o in UOV */
     size_t tri_size = (size_t)n * ((size_t)n + 1) / 2;
-    size_t cm_size = (size_t)m * tri_size;
-    size_t T_size = (size_t)o * (size_t)n;
-    uint8_t *central_map = NULL;
-    uint8_t *T = NULL;
+    size_t P_size = (size_t)m * tri_size;
+    uint8_t *P = NULL;
     uint8_t *aug_mat = NULL;
     uint8_t salt[32];
     uint8_t target[PQC_UOV_MAX_O];
@@ -213,16 +211,32 @@ static pqc_status_t uov_sign_impl(uint8_t *sig, size_t *siglen,
     int eq, i, j, attempt;
     pqc_status_t rc;
 
-    central_map = (uint8_t *)pqc_calloc(1, cm_size);
-    T = (uint8_t *)pqc_calloc(1, T_size);
+    P = (uint8_t *)pqc_calloc(1, P_size);
     aug_mat = (uint8_t *)pqc_calloc(1, (size_t)m * (size_t)cols);
-    if (!central_map || !T || !aug_mat) {
+    if (!P || !aug_mat) {
         rc = PQC_ERROR_ALLOC;
         goto cleanup;
     }
 
-    /* Expand secret key */
-    uov_expand_sk(central_map, T, sk, params);
+    /*
+     * Derive pk_seed from sk_seed (same derivation as keygen)
+     * and expand the public map from it, so sign and verify use
+     * the same polynomial system.
+     */
+    {
+        uint8_t pk_seed[64]; /* large enough for any seed_len */
+        pqc_shake256_ctx ctx;
+        uint8_t domain = 0x02;
+        pqc_shake256_init(&ctx);
+        pqc_shake256_absorb(&ctx, &domain, 1);
+        pqc_shake256_absorb(&ctx, sk, (size_t)params->seed_len);
+        pqc_shake256_finalize(&ctx);
+        pqc_shake256_squeeze(&ctx, pk_seed, (size_t)params->seed_len);
+        pqc_memzero(&ctx, sizeof(ctx));
+
+        uov_expand_pk_from_seed(P, pk_seed, (size_t)params->seed_len, n, m);
+        pqc_memzero(pk_seed, sizeof(pk_seed));
+    }
 
     /* Generate salt and hash message */
     rc = pqc_randombytes(salt, 16);
@@ -234,10 +248,10 @@ static pqc_status_t uov_sign_impl(uint8_t *sig, size_t *siglen,
         rc = pqc_randombytes(vin_vals, (size_t)v);
         if (rc != PQC_OK) { rc = PQC_ERROR_RNG_FAILED; goto cleanup; }
 
-        /* Substitute vinegar into central map to get linear system */
+        /* Substitute vinegar into public map to get linear system */
         memset(aug_mat, 0, (size_t)m * (size_t)cols);
         for (eq = 0; eq < m; eq++) {
-            const uint8_t *poly = central_map + eq * tri_size;
+            const uint8_t *poly = P + eq * tri_size;
             uint8_t constant = 0;
             int idx = 0;
 
@@ -269,8 +283,7 @@ static pqc_status_t uov_sign_impl(uint8_t *sig, size_t *siglen,
 
     /*
      * Build signature: salt (16 bytes) || signature vector (n bytes).
-     * The signature vector = T^{-1} * (vinegar || oil).
-     * Since T has the form [T' | I_o], the inverse application is simple.
+     * signature vector = (vinegar values || oil values from solved system)
      */
     memcpy(sig, salt, 16);
     /* Write vinegar values */
@@ -284,8 +297,7 @@ static pqc_status_t uov_sign_impl(uint8_t *sig, size_t *siglen,
     rc = PQC_OK;
 
 cleanup:
-    if (central_map) pqc_free(central_map, cm_size);
-    if (T) pqc_free(T, T_size);
+    if (P) pqc_free(P, P_size);
     if (aug_mat) pqc_free(aug_mat, (size_t)m * (size_t)cols);
     pqc_memzero(vin_vals, sizeof(vin_vals));
     pqc_memzero(salt, sizeof(salt));

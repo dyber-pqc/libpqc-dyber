@@ -32,27 +32,27 @@
 
 static const mceliece_params_t params_348864 = {
     .m = 12, .t = 64, .n = 3488, .k = 2720, .field_size = 4096,
-    .pk_bytes = 261120, .sk_bytes = 6492, .ct_bytes = 128, .ss_bytes = 32
+    .pk_bytes = 261120, .sk_bytes = 7138, .ct_bytes = 128, .ss_bytes = 32
 };
 
 static const mceliece_params_t params_460896 = {
     .m = 13, .t = 96, .n = 4608, .k = 3360, .field_size = 8192,
-    .pk_bytes = 524160, .sk_bytes = 13608, .ct_bytes = 188, .ss_bytes = 32
+    .pk_bytes = 524160, .sk_bytes = 9442, .ct_bytes = 188, .ss_bytes = 32
 };
 
 static const mceliece_params_t params_6688128 = {
     .m = 13, .t = 128, .n = 6688, .k = 5024, .field_size = 8192,
-    .pk_bytes = 1044992, .sk_bytes = 13932, .ct_bytes = 240, .ss_bytes = 32
+    .pk_bytes = 1044992, .sk_bytes = 13666, .ct_bytes = 240, .ss_bytes = 32
 };
 
 static const mceliece_params_t params_6960119 = {
     .m = 13, .t = 119, .n = 6960, .k = 5413, .field_size = 8192,
-    .pk_bytes = 1047319, .sk_bytes = 13948, .ct_bytes = 226, .ss_bytes = 32
+    .pk_bytes = 1047319, .sk_bytes = 14192, .ct_bytes = 226, .ss_bytes = 32
 };
 
 static const mceliece_params_t params_8192128 = {
     .m = 13, .t = 128, .n = 8192, .k = 6528, .field_size = 8192,
-    .pk_bytes = 1357824, .sk_bytes = 14120, .ct_bytes = 240, .ss_bytes = 32
+    .pk_bytes = 1357824, .sk_bytes = 16674, .ct_bytes = 240, .ss_bytes = 32
 };
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +258,30 @@ static pqc_status_t mceliece_decaps_impl(uint8_t *ss, const uint8_t *ct,
     /* Decrypt: recover error vector */
     int rc = mceliece_decrypt(e, ct, g, perm, p);
 
+    /* Verify the C1 hash: ct[syn_bytes..] must equal SHA3-256(2 || e) */
+    if (rc == 0) {
+        int syn_bytes = (p->m * p->t + 7) / 8;
+        uint8_t c1_check[32];
+        size_t c1_in_len = 1 + (size_t)e_bytes;
+        uint8_t *c1_in = (uint8_t *)calloc(1, c1_in_len);
+        if (!c1_in) {
+            free(perm);
+            free(e);
+            return PQC_ERROR_ALLOC;
+        }
+        c1_in[0] = 2;
+        memcpy(c1_in + 1, e, (size_t)e_bytes);
+        pqc_sha3_256(c1_check, c1_in, c1_in_len);
+        free(c1_in);
+
+        /* Constant-time comparison */
+        uint8_t diff = 0;
+        for (int i = 0; i < 32; i++)
+            diff |= c1_check[i] ^ ct[syn_bytes + i];
+        if (diff != 0)
+            rc = -1; /* hash mismatch => decoding failure */
+    }
+
     /*
      * Compute shared secret with implicit rejection:
      * On success: ss = SHA3-256(1 || e || ct)
@@ -350,7 +374,7 @@ static const pqc_kem_vtable_t mceliece348864_vtable = {
     .security_level    = PQC_SECURITY_LEVEL_1,
     .nist_standard     = "Classic McEliece (NIST Round 4)",
     .public_key_size   = 261120,
-    .secret_key_size   = 6492,
+    .secret_key_size   = 7138,
     .ciphertext_size   = 128,
     .shared_secret_size = 32,
     .keygen = mceliece348864_keygen,
@@ -363,7 +387,7 @@ static const pqc_kem_vtable_t mceliece460896_vtable = {
     .security_level    = PQC_SECURITY_LEVEL_3,
     .nist_standard     = "Classic McEliece (NIST Round 4)",
     .public_key_size   = 524160,
-    .secret_key_size   = 13608,
+    .secret_key_size   = 9442,
     .ciphertext_size   = 188,
     .shared_secret_size = 32,
     .keygen = mceliece460896_keygen,
@@ -376,7 +400,7 @@ static const pqc_kem_vtable_t mceliece6688128_vtable = {
     .security_level    = PQC_SECURITY_LEVEL_5,
     .nist_standard     = "Classic McEliece (NIST Round 4)",
     .public_key_size   = 1044992,
-    .secret_key_size   = 13932,
+    .secret_key_size   = 13666,
     .ciphertext_size   = 240,
     .shared_secret_size = 32,
     .keygen = mceliece6688128_keygen,
@@ -389,7 +413,7 @@ static const pqc_kem_vtable_t mceliece6960119_vtable = {
     .security_level    = PQC_SECURITY_LEVEL_5,
     .nist_standard     = "Classic McEliece (NIST Round 4)",
     .public_key_size   = 1047319,
-    .secret_key_size   = 13948,
+    .secret_key_size   = 14192,
     .ciphertext_size   = 226,
     .shared_secret_size = 32,
     .keygen = mceliece6960119_keygen,
@@ -402,7 +426,7 @@ static const pqc_kem_vtable_t mceliece8192128_vtable = {
     .security_level    = PQC_SECURITY_LEVEL_5,
     .nist_standard     = "Classic McEliece (NIST Round 4)",
     .public_key_size   = 1357824,
-    .secret_key_size   = 14120,
+    .secret_key_size   = 16674,
     .ciphertext_size   = 240,
     .shared_secret_size = 32,
     .keygen = mceliece8192128_keygen,

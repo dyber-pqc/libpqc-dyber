@@ -46,6 +46,7 @@ static int16_t mod_q(int32_t x, int q)
  * gets added to positions 1 and 0. */
 static void rq_reduce_ring(int32_t *coeffs, int deg, int pp, int q)
 {
+    (void)q;
     for (int i = deg; i >= pp; i--) {
         if (coeffs[i] == 0) continue;
         /* x^i = x^(i-p) * x^p = x^(i-p) * (x + 1) = x^(i-p+1) + x^(i-p) */

@@ -7,7 +7,7 @@
  *
  * Supports m=12 (for mceliece348864) and m=13 (for all others).
  * Uses log/antilog tables for multiplication, with irreducible polynomials:
- *   m=12: x^12 + x^6 + x^4 + x + 1  (0x1071)
+ *   m=12: x^12 + x^6 + x^4 + x + 1  (0x1053)
  *   m=13: x^13 + x^4 + x^3 + x + 1  (0x201B)
  */
 
@@ -18,7 +18,7 @@
 /* Irreducible polynomials over GF(2)                                  */
 /* ------------------------------------------------------------------ */
 
-#define GF12_POLY  0x1071u   /* x^12 + x^6 + x^4 + x + 1 */
+#define GF12_POLY  0x1053u   /* x^12 + x^6 + x^4 + x + 1 */
 #define GF13_POLY  0x201Bu   /* x^13 + x^4 + x^3 + x + 1 */
 
 /* ------------------------------------------------------------------ */

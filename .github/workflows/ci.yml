@@ -1,11 +1,11 @@
 name: CI
 
 on:
-  workflow_dispatch:  # Manual trigger only until algorithms are stable
-  # push:
-  #   branches: [main, develop]
-  # pull_request:
-  #   branches: [main]
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

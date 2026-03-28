@@ -5,13 +5,18 @@
  *
  * FN-DSA (FIPS 206) -- NTRU equation solver.
  *
- * Uses modular arithmetic (mod a large prime P) for the recursive
- * field norm computation.  At the base case (n=1), the solution
- * F, G satisfies |F|, |G| <= q = 12289.  Since P >> q, the modular
- * computation gives exact integer results for the base case.
- * Then lifts back up using FFT-based Babai reduction with the
- * stored int32_t field norms (which may be truncated at deep levels,
- * but the FFT lift and Babai reduction tolerate this).
+ * Solves f*G - g*F = q  mod (x^n + 1) for polynomials F, G given
+ * small polynomials f, g.
+ *
+ * Algorithm:
+ *   1. Descend by computing field norms at each level, halving the
+ *      degree.  Uses modular arithmetic (one 30-bit prime) and int32_t
+ *      (truncated) field norms.
+ *   2. At the base case (degree 1), solve f0*G0 - g0*F0 = q using
+ *      extended GCD on the modular residues.
+ *   3. Lift from level 1 back to level logn using FFT-based Babai
+ *      rounding with the stored int32_t field norms.  The Babai
+ *      reduction corrects for the modular approximation at each step.
  */
 
 #include <math.h>
@@ -34,34 +39,29 @@ static int64_t modp_mul(int64_t a, int64_t b) {
     return modp(modp(a) * modp(b));
 }
 
-static int64_t modp_inv(int64_t a) {
-    int64_t r = 1, base = modp(a), exp = MOD_P - 2;
-    while (exp > 0) {
-        if (exp & 1) r = modp_mul(r, base);
-        base = modp_mul(base, base);
-        exp >>= 1;
-    }
-    return r;
-}
-
-static int32_t modp_to_signed(int64_t x) {
-    if (x > MOD_P / 2) return (int32_t)(x - MOD_P);
-    return (int32_t)x;
-}
-
 /* ------------------------------------------------------------------ */
 /* Extended GCD                                                         */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Compute gcd(a, b) and Bezout coefficients u, v such that
+ *   u*a + v*b = gcd(a, b).
+ */
 static int64_t
 xgcd(int64_t a, int64_t b, int64_t *u, int64_t *v)
 {
-    int64_t u0=1,u1=0,v0=0,v1=1;
-    if(a<0){int64_t r=xgcd(-a,b,u,v);*u=-(*u);return r;}
-    if(b<0){int64_t r=xgcd(a,-b,u,v);*v=-(*v);return r;}
-    while(b!=0){int64_t q=a/b,t;
-        t=a-q*b;a=b;b=t; t=u0-q*u1;u0=u1;u1=t; t=v0-q*v1;v0=v1;v1=t;}
-    *u=u0; *v=v0; return a;
+    int64_t u0 = 1, u1 = 0, v0 = 0, v1 = 1;
+    if (a < 0) { int64_t r = xgcd(-a, b, u, v); *u = -(*u); return r; }
+    if (b < 0) { int64_t r = xgcd(a, -b, u, v); *v = -(*v); return r; }
+    while (b != 0) {
+        int64_t q = a / b, t;
+        t = a - q * b; a = b; b = t;
+        t = u0 - q * u1; u0 = u1; u1 = t;
+        t = v0 - q * v1; v0 = v1; v1 = t;
+    }
+    *u = u0;
+    *v = v0;
+    return a;
 }
 
 /* ------------------------------------------------------------------ */
@@ -73,17 +73,19 @@ field_norm_modp(int64_t *out, const int64_t *f, size_t hn)
 {
     size_t i, j;
     memset(out, 0, hn * sizeof(int64_t));
+
     for (i = 0; i < hn; i++)
         for (j = 0; j < hn; j++) {
             size_t idx = i + j;
-            int64_t p = modp_mul(f[2*i], f[2*j]);
+            int64_t p = modp_mul(f[2 * i], f[2 * j]);
             if (idx >= hn) { idx -= hn; out[idx] = modp(out[idx] - p); }
             else { out[idx] = modp(out[idx] + p); }
         }
+
     for (i = 0; i < hn; i++)
         for (j = 0; j < hn; j++) {
             size_t idx = i + j + 1;
-            int64_t p = modp_mul(f[2*i+1], f[2*j+1]);
+            int64_t p = modp_mul(f[2 * i + 1], f[2 * j + 1]);
             if (idx >= hn) { idx -= hn; out[idx] = modp(out[idx] + p); }
             else { out[idx] = modp(out[idx] - p); }
         }
@@ -103,59 +105,104 @@ ntru_lift_fft(unsigned logn,
     size_t n = (size_t)1 << logn;
     size_t hn = n >> 1;
     size_t i;
-    double *t0=tmp, *t1=t0+n, *t2=t1+n, *t3=t2+n, *t4=t3+n;
+    double *t0 = tmp, *t1 = t0 + n, *t2 = t1 + n, *t3 = t2 + n, *t4 = t3 + n;
 
-    memset(t2, 0, n*sizeof(double));
-    for(i=0;i<hn;i++) t2[2*i]=(double)Fp[i];
-    memset(t3, 0, n*sizeof(double));
-    for(i=0;i<hn;i++) t3[2*i]=(double)Gp[i];
-    for(i=0;i<n;i++) t0[i]=(double)g[i]*((i&1)?-1.0:1.0);
-    for(i=0;i<n;i++) t1[i]=(double)f[i]*((i&1)?-1.0:1.0);
+    /* F(x) = Fp(x^2) * g(-x),  G(x) = Gp(x^2) * f(-x). */
+    memset(t2, 0, n * sizeof(double));
+    for (i = 0; i < hn; i++)
+        t2[2 * i] = (double)Fp[i];
 
-    fndsa_fft_forward(t0,logn); fndsa_fft_forward(t1,logn);
-    fndsa_fft_forward(t2,logn); fndsa_fft_forward(t3,logn);
-    fndsa_fft_mul(t2,t0,logn); fndsa_fft_mul(t3,t1,logn);
-    fndsa_fft_inverse(t2,logn); fndsa_fft_inverse(t3,logn);
+    memset(t3, 0, n * sizeof(double));
+    for (i = 0; i < hn; i++)
+        t3[2 * i] = (double)Gp[i];
 
-    for(i=0;i<n;i++){F[i]=(int32_t)floor(t2[i]+0.5);G[i]=(int32_t)floor(t3[i]+0.5);}
+    for (i = 0; i < n; i++)
+        t0[i] = (double)g[i] * ((i & 1) ? -1.0 : 1.0);
+    for (i = 0; i < n; i++)
+        t1[i] = (double)f[i] * ((i & 1) ? -1.0 : 1.0);
 
-    /* Babai */
-    {int iter; for(iter=0;iter<10;iter++){
-        for(i=0;i<n;i++) t0[i]=(double)f[i];
-        fndsa_fft_forward(t0,logn);
-        memcpy(t4,t0,n*sizeof(double));
-        fndsa_fft_mul_selfadj(t4,logn);
-        for(i=0;i<n;i++) t1[i]=(double)g[i];
-        fndsa_fft_forward(t1,logn);
-        memcpy(t3,t1,n*sizeof(double));
-        fndsa_fft_mul_selfadj(t3,logn);
-        fndsa_fft_add(t4,t3,logn);
-        for(i=0;i<n;i++) t2[i]=(double)F[i];
-        fndsa_fft_forward(t2,logn);
-        fndsa_fft_mul_adj(t2,t0,logn);
-        for(i=0;i<n;i++) t3[i]=(double)G[i];
-        fndsa_fft_forward(t3,logn);
-        for(i=0;i<n;i++) t1[i]=(double)g[i];
-        fndsa_fft_forward(t1,logn);
-        fndsa_fft_mul_adj(t3,t1,logn);
-        fndsa_fft_add(t2,t3,logn);
-        fndsa_fft_div(t2,t4,logn);
-        fndsa_fft_inverse(t2,logn);
-        {int any=0; size_t j;
-         int64_t *Fn=(int64_t*)malloc(n*sizeof(int64_t));
-         int64_t *Gn=(int64_t*)malloc(n*sizeof(int64_t));
-         if(!Fn||!Gn){free(Fn);free(Gn);return -1;}
-         for(i=0;i<n;i++){Fn[i]=F[i];Gn[i]=G[i];}
-         for(i=0;i<n;i++){int32_t ki=(int32_t)floor(t2[i]+0.5);
-           if(ki==0)continue; any=1;
-           for(j=0;j<n;j++){size_t idx=i+j;
-             int64_t kf=(int64_t)ki*f[j],kg=(int64_t)ki*g[j];
-             if(idx>=n){idx-=n;Fn[idx]+=kf;Gn[idx]+=kg;}
-             else{Fn[idx]-=kf;Gn[idx]-=kg;}}}
-         for(i=0;i<n;i++){F[i]=(int32_t)Fn[i];G[i]=(int32_t)Gn[i];}
-         free(Fn);free(Gn);
-         if(!any)break;}
-    }}
+    fndsa_fft_forward(t0, logn);
+    fndsa_fft_forward(t1, logn);
+    fndsa_fft_forward(t2, logn);
+    fndsa_fft_forward(t3, logn);
+    fndsa_fft_mul(t2, t0, logn);
+    fndsa_fft_mul(t3, t1, logn);
+    fndsa_fft_inverse(t2, logn);
+    fndsa_fft_inverse(t3, logn);
+
+    for (i = 0; i < n; i++) {
+        F[i] = (int32_t)floor(t2[i] + 0.5);
+        G[i] = (int32_t)floor(t3[i] + 0.5);
+    }
+
+    /* Babai reduction. */
+    {
+        int iter;
+        for (iter = 0; iter < 10; iter++) {
+            int any = 0;
+            size_t j;
+            int64_t *Fn, *Gn;
+
+            for (i = 0; i < n; i++) t0[i] = (double)f[i];
+            fndsa_fft_forward(t0, logn);
+
+            for (i = 0; i < n; i++) t1[i] = (double)g[i];
+            fndsa_fft_forward(t1, logn);
+
+            memcpy(t4, t0, n * sizeof(double));
+            fndsa_fft_mul_selfadj(t4, logn);
+            memcpy(t3, t1, n * sizeof(double));
+            fndsa_fft_mul_selfadj(t3, logn);
+            fndsa_fft_add(t4, t3, logn);
+
+            for (i = 0; i < n; i++) t2[i] = (double)F[i];
+            fndsa_fft_forward(t2, logn);
+            fndsa_fft_mul_adj(t2, t0, logn);
+
+            for (i = 0; i < n; i++) t3[i] = (double)G[i];
+            fndsa_fft_forward(t3, logn);
+            fndsa_fft_mul_adj(t3, t1, logn);
+
+            fndsa_fft_add(t2, t3, logn);
+            fndsa_fft_div(t2, t4, logn);
+            fndsa_fft_inverse(t2, logn);
+
+            Fn = (int64_t *)malloc(n * sizeof(int64_t));
+            Gn = (int64_t *)malloc(n * sizeof(int64_t));
+            if (!Fn || !Gn) { free(Fn); free(Gn); return -1; }
+
+            for (i = 0; i < n; i++) { Fn[i] = F[i]; Gn[i] = G[i]; }
+
+            for (i = 0; i < n; i++) {
+                int32_t ki = (int32_t)floor(t2[i] + 0.5);
+                if (ki == 0) continue;
+                any = 1;
+                for (j = 0; j < n; j++) {
+                    size_t idx = i + j;
+                    int64_t kf = (int64_t)ki * f[j];
+                    int64_t kg = (int64_t)ki * g[j];
+                    if (idx >= n) {
+                        idx -= n;
+                        Fn[idx] += kf;
+                        Gn[idx] += kg;
+                    } else {
+                        Fn[idx] -= kf;
+                        Gn[idx] -= kg;
+                    }
+                }
+            }
+
+            for (i = 0; i < n; i++) {
+                F[i] = (int32_t)Fn[i];
+                G[i] = (int32_t)Gn[i];
+            }
+            free(Fn);
+            free(Gn);
+
+            if (!any) break;
+        }
+    }
+
     return 0;
 }
 
@@ -174,10 +221,11 @@ fndsa_solve_ntru(unsigned logn,
     size_t i;
     int rc;
 
-    /* Store int32_t field norms for the lift at each level. */
+    /* int32_t field norms for the Babai lift at each level. */
     int32_t *fi32[FNDSA_MAX_LOGN + 1];
     int32_t *gi32[FNDSA_MAX_LOGN + 1];
-    /* Store modular field norms for the base-case solution. */
+
+    /* Modular field norms for the base-case solution. */
     int64_t *fmod[FNDSA_MAX_LOGN + 1];
     int64_t *gmod[FNDSA_MAX_LOGN + 1];
 
@@ -191,7 +239,7 @@ fndsa_solve_ntru(unsigned logn,
     gi32[logn] = (int32_t *)malloc(n * sizeof(int32_t));
     fmod[logn] = (int64_t *)malloc(n * sizeof(int64_t));
     gmod[logn] = (int64_t *)malloc(n * sizeof(int64_t));
-    if (!fi32[logn]||!gi32[logn]||!fmod[logn]||!gmod[logn])
+    if (!fi32[logn] || !gi32[logn] || !fmod[logn] || !gmod[logn])
         { rc = -1; goto done; }
 
     for (i = 0; i < n; i++) {
@@ -201,130 +249,172 @@ fndsa_solve_ntru(unsigned logn,
         gmod[logn][i] = modp((int64_t)g[i]);
     }
 
-    /* Descend: compute field norms at each level. */
+    /* ------------------------------------------------------------ */
+    /* Descend: compute field norms at each level.                    */
+    /* ------------------------------------------------------------ */
     for (lv = logn; lv > 0; lv--) {
         size_t cn = (size_t)1 << lv;
         size_t chn = cn >> 1;
         int64_t *tmp64;
 
-        fi32[lv-1] = (int32_t *)malloc(chn * sizeof(int32_t));
-        gi32[lv-1] = (int32_t *)malloc(chn * sizeof(int32_t));
-        fmod[lv-1] = (int64_t *)malloc(chn * sizeof(int64_t));
-        gmod[lv-1] = (int64_t *)malloc(chn * sizeof(int64_t));
-        if (!fi32[lv-1]||!gi32[lv-1]||!fmod[lv-1]||!gmod[lv-1])
+        fi32[lv - 1] = (int32_t *)malloc(chn * sizeof(int32_t));
+        gi32[lv - 1] = (int32_t *)malloc(chn * sizeof(int32_t));
+        fmod[lv - 1] = (int64_t *)malloc(chn * sizeof(int64_t));
+        gmod[lv - 1] = (int64_t *)malloc(chn * sizeof(int64_t));
+        if (!fi32[lv - 1] || !gi32[lv - 1] || !fmod[lv - 1] || !gmod[lv - 1])
             { rc = -1; goto done; }
 
-        /* int32_t field norms (with int64_t intermediates, truncated). */
+        /* int32_t field norms (truncated -- Babai tolerates this). */
         tmp64 = (int64_t *)calloc(chn, sizeof(int64_t));
         if (!tmp64) { rc = -1; goto done; }
-
-        for (i = 0; i < chn; i++) { size_t j;
+        for (i = 0; i < chn; i++) {
+            size_t j;
             for (j = 0; j < chn; j++) {
-                size_t idx = i+j;
-                int64_t p = (int64_t)fi32[lv][2*i] * (int64_t)fi32[lv][2*j];
-                if(idx>=chn){idx-=chn;tmp64[idx]-=p;}else{tmp64[idx]+=p;}}}
-        for (i = 0; i < chn; i++) { size_t j;
+                size_t idx = i + j;
+                int64_t p = (int64_t)fi32[lv][2 * i] * (int64_t)fi32[lv][2 * j];
+                if (idx >= chn) { idx -= chn; tmp64[idx] -= p; }
+                else { tmp64[idx] += p; }
+            }
+        }
+        for (i = 0; i < chn; i++) {
+            size_t j;
             for (j = 0; j < chn; j++) {
-                size_t idx = i+j+1;
-                int64_t p = (int64_t)fi32[lv][2*i+1] * (int64_t)fi32[lv][2*j+1];
-                if(idx>=chn){idx-=chn;tmp64[idx]+=p;}else{tmp64[idx]-=p;}}}
-        for (i = 0; i < chn; i++) fi32[lv-1][i] = (int32_t)tmp64[i];
+                size_t idx = i + j + 1;
+                int64_t p = (int64_t)fi32[lv][2 * i + 1] * (int64_t)fi32[lv][2 * j + 1];
+                if (idx >= chn) { idx -= chn; tmp64[idx] += p; }
+                else { tmp64[idx] -= p; }
+            }
+        }
+        for (i = 0; i < chn; i++) fi32[lv - 1][i] = (int32_t)tmp64[i];
         free(tmp64);
 
         tmp64 = (int64_t *)calloc(chn, sizeof(int64_t));
         if (!tmp64) { rc = -1; goto done; }
-        for (i = 0; i < chn; i++) { size_t j;
+        for (i = 0; i < chn; i++) {
+            size_t j;
             for (j = 0; j < chn; j++) {
-                size_t idx = i+j;
-                int64_t p = (int64_t)gi32[lv][2*i] * (int64_t)gi32[lv][2*j];
-                if(idx>=chn){idx-=chn;tmp64[idx]-=p;}else{tmp64[idx]+=p;}}}
-        for (i = 0; i < chn; i++) { size_t j;
+                size_t idx = i + j;
+                int64_t p = (int64_t)gi32[lv][2 * i] * (int64_t)gi32[lv][2 * j];
+                if (idx >= chn) { idx -= chn; tmp64[idx] -= p; }
+                else { tmp64[idx] += p; }
+            }
+        }
+        for (i = 0; i < chn; i++) {
+            size_t j;
             for (j = 0; j < chn; j++) {
-                size_t idx = i+j+1;
-                int64_t p = (int64_t)gi32[lv][2*i+1] * (int64_t)gi32[lv][2*j+1];
-                if(idx>=chn){idx-=chn;tmp64[idx]+=p;}else{tmp64[idx]-=p;}}}
-        for (i = 0; i < chn; i++) gi32[lv-1][i] = (int32_t)tmp64[i];
+                size_t idx = i + j + 1;
+                int64_t p = (int64_t)gi32[lv][2 * i + 1] * (int64_t)gi32[lv][2 * j + 1];
+                if (idx >= chn) { idx -= chn; tmp64[idx] += p; }
+                else { tmp64[idx] -= p; }
+            }
+        }
+        for (i = 0; i < chn; i++) gi32[lv - 1][i] = (int32_t)tmp64[i];
         free(tmp64);
 
         /* Modular field norms (exact mod P). */
-        field_norm_modp(fmod[lv-1], fmod[lv], chn);
-        field_norm_modp(gmod[lv-1], gmod[lv], chn);
+        field_norm_modp(fmod[lv - 1], fmod[lv], chn);
+        field_norm_modp(gmod[lv - 1], gmod[lv], chn);
     }
 
-    /* Base case: solve using modular values. */
+    /* ------------------------------------------------------------ */
+    /* Base case: solve f0*G0 - g0*F0 = q.                           */
+    /*                                                                */
+    /* We have f0 mod P and g0 mod P.  We use xgcd on these modular  */
+    /* residues to find Bezout coefficients, then compute F0, G0.     */
+    /* The resulting (F0, G0) satisfies the equation mod P.  Since    */
+    /* |F0|, |G0| might be up to P/2, the Babai lift at subsequent   */
+    /* levels will reduce them.                                       */
+    /* ------------------------------------------------------------ */
     {
-        int64_t fi_val = fmod[0][0];
-        int64_t gi_val = gmod[0][0];
+        int64_t f0_mod = fmod[0][0];
+        int64_t g0_mod = gmod[0][0];
+        int64_t f0_s, g0_s;
+        int64_t u, v, d, scale;
+        int64_t G0, F0;
 
-        if (fi_val == 0 && gi_val == 0) {
-            rc = -1; goto done;
+        /* Convert to centered representation. */
+        f0_s = (f0_mod > MOD_P / 2) ? f0_mod - MOD_P : f0_mod;
+        g0_s = (g0_mod > MOD_P / 2) ? g0_mod - MOD_P : g0_mod;
+
+        if (f0_s == 0 && g0_s == 0) {
+            rc = -1;
+            goto done;
         }
 
-        if (fi_val != 0) {
-            int64_t fi_inv = modp_inv(fi_val);
-            int64_t G_val = modp_mul(FNDSA_Q, fi_inv);
-            G[0] = modp_to_signed(G_val);
-            F[0] = 0;
-        } else {
-            int64_t gi_inv = modp_inv(gi_val);
-            int64_t F_val = modp_mul(FNDSA_Q, gi_inv);
-            F[0] = -modp_to_signed(F_val);
-            G[0] = 0;
+        d = xgcd(f0_s, g0_s, &u, &v);
+        if (d < 0) { d = -d; u = -u; v = -v; }
+
+        if (d == 0 || (FNDSA_Q % d) != 0) {
+            /* gcd doesn't divide q -- bad key parameters. */
+            rc = -1;
+            goto done;
         }
+
+        scale = FNDSA_Q / d;
+
+        /* u * f0_s + v * g0_s = d
+         * f0 * (u*scale) + g0 * (v*scale) = q  (mod P)
+         * f0 * G0 - g0 * F0 = q
+         * => G0 = u*scale,  F0 = -v*scale */
+        G0 = u * scale;
+        F0 = -v * scale;
+
+        /* Reduce by g0_s, f0_s to get smaller values.
+         * (F0 + k*f0_s, G0 + k*g0_s) is also a solution for any k. */
+        if (g0_s != 0) {
+            /* Find k such that |G0 + k*g0_s| is minimised. */
+            int64_t k = -G0 / g0_s;
+            int64_t best = G0 + k * g0_s;
+            int64_t alt1 = best + g0_s;
+            int64_t alt2 = best - g0_s;
+            int64_t abest = (best < 0) ? -best : best;
+            int64_t a1 = (alt1 < 0) ? -alt1 : alt1;
+            int64_t a2 = (alt2 < 0) ? -alt2 : alt2;
+            if (a1 < abest) { best = alt1; k++; }
+            if (a2 < abest) { best = alt2; k--; }
+            G0 += k * g0_s;
+            F0 += k * f0_s;
+        }
+
+        G[0] = (int32_t)G0;
+        F[0] = (int32_t)F0;
     }
 
-    /* Lift from level 1 up to level logn using modular field norms.
-     * At each level, the lift and Babai reduction are computed
-     * using the modular f, g (converted to centered int32_t).
-     * The final result is checked by keygen for correctness. */
+    /* ------------------------------------------------------------ */
+    /* Lift from level 1 up to level logn.                            */
+    /*                                                                */
+    /* Always use the int32_t field norms for the lift.  At top       */
+    /* levels these are exact; at deeper levels the truncation is     */
+    /* tolerated by the Babai correction.                             */
+    /* ------------------------------------------------------------ */
     for (lv = 1; lv <= logn; lv++) {
         size_t cn = (size_t)1 << lv;
         size_t chn = cn >> 1;
         int32_t *Fp = (int32_t *)malloc(chn * sizeof(int32_t));
         int32_t *Gp = (int32_t *)malloc(chn * sizeof(int32_t));
-        int32_t *fl = (int32_t *)malloc(cn * sizeof(int32_t));
-        int32_t *gl = (int32_t *)malloc(cn * sizeof(int32_t));
-        size_t k;
 
-        if (!Fp || !Gp || !fl || !gl) {
-            free(Fp); free(Gp); free(fl); free(gl);
+        if (!Fp || !Gp) {
+            free(Fp); free(Gp);
             rc = -1; goto done;
         }
 
         memcpy(Fp, F, chn * sizeof(int32_t));
         memcpy(Gp, G, chn * sizeof(int32_t));
 
-        /* Use exact original f, g at top levels (where int32_t is exact),
-         * and modular values at deeper levels. */
-        if (lv >= logn - 1) {
-            /* Top 2 levels: use exact int32_t values. */
-            memcpy(fl, fi32[lv], cn * sizeof(int32_t));
-            memcpy(gl, gi32[lv], cn * sizeof(int32_t));
-        } else {
-            /* Deeper levels: use modular values (centered). */
-            for (k = 0; k < cn; k++) {
-                fl[k] = modp_to_signed(fmod[lv][k]);
-                gl[k] = modp_to_signed(gmod[lv][k]);
-            }
-        }
-
-        rc = ntru_lift_fft(lv, fl, gl, F, G, Fp, Gp, tmp);
-        free(Fp); free(Gp); free(fl); free(gl);
+        rc = ntru_lift_fft(lv, fi32[lv], gi32[lv], F, G, Fp, Gp, tmp);
+        free(Fp);
+        free(Gp);
         if (rc != 0) goto done;
     }
-
-    /* The recursive lift may not produce exact results because the
-     * intermediate modular field norms don't match the exact integer
-     * field norms.  The keygen verification step will catch errors. */
-
-    /* (dead code removed) */
 
     rc = 0;
 
 done:
     for (lv = 0; lv <= logn; lv++) {
-        free(fi32[lv]); free(gi32[lv]);
-        free(fmod[lv]); free(gmod[lv]);
+        free(fi32[lv]);
+        free(gi32[lv]);
+        free(fmod[lv]);
+        free(gmod[lv]);
     }
     return rc;
 }

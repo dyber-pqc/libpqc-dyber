@@ -156,17 +156,6 @@ static void hash_small(uint8_t out[32], const r3_poly_t *r, int pp)
     free(encoded);
 }
 
-static void hash_rq(uint8_t out[32], const rq_poly_t *c,
-                    const sntrup_params_t *p)
-{
-    int rq_bytes = p->p * 2;
-    uint8_t *encoded = (uint8_t *)calloc(1, (size_t)rq_bytes);
-    if (!encoded) return;
-    sntrup_encode_rq(encoded, c, p);
-    pqc_sha256(out, encoded, (size_t)rq_bytes);
-    free(encoded);
-}
-
 /* ------------------------------------------------------------------ */
 /* Key generation                                                      */
 /* ------------------------------------------------------------------ */
@@ -294,7 +283,6 @@ static pqc_status_t sntrup_encaps_impl(uint8_t *ct, uint8_t *ss,
     sntrup_encode_rq(ct, &c, p);
 
     /* Append confirmation hash: SHA-256(r_encoded) */
-    int small_bytes = (p->p + 4) / 5;
     uint8_t r_hash[32];
     hash_small(r_hash, &r, p->p);
     memcpy(ct + rq_bytes, r_hash, 32);

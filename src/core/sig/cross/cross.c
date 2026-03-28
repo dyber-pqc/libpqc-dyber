@@ -389,6 +389,7 @@ static pqc_status_t cross_verify_impl(const uint8_t *msg, size_t msglen,
                                        const uint8_t *pk,
                                        const cross_params_t *params)
 {
+    (void)pk;
     int t = params->t;
     int hash_len = params->hash_len;
     int seed_len = params->seed_len;
@@ -399,7 +400,6 @@ static pqc_status_t cross_verify_impl(const uint8_t *msg, size_t msglen,
     const uint8_t *merkle_root;
     size_t pos;
     int i;
-    pqc_status_t rc;
 
     (void)siglen;
 

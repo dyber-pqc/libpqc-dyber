@@ -25,9 +25,9 @@
 #define MCELIECE_348864_K           (MCELIECE_348864_N - MCELIECE_348864_M * MCELIECE_348864_T)  /* 2720 */
 #define MCELIECE_348864_FIELD_SIZE  (1 << MCELIECE_348864_M)  /* 4096 */
 
-#define MCELIECE_348864_PK_BYTES    261120  /* k/8 * (n-k) = row-major systematic form */
-#define MCELIECE_348864_SK_BYTES    6492
-#define MCELIECE_348864_CT_BYTES    128     /* ceil(n/8) for the syndrome  */
+#define MCELIECE_348864_PK_BYTES    261120  /* mt * ceil(k/8) = row-major systematic form */
+#define MCELIECE_348864_SK_BYTES    7138    /* (t+1)*2 + n*2 + 32 = 130 + 6976 + 32 */
+#define MCELIECE_348864_CT_BYTES    128     /* ceil(mt/8) + 32 = 96 + 32 */
 #define MCELIECE_348864_SS_BYTES    32
 
 /* ------------------------------------------------------------------ */
@@ -40,8 +40,8 @@
 #define MCELIECE_460896_FIELD_SIZE  (1 << MCELIECE_460896_M)  /* 8192 */
 
 #define MCELIECE_460896_PK_BYTES    524160
-#define MCELIECE_460896_SK_BYTES    13608
-#define MCELIECE_460896_CT_BYTES    188
+#define MCELIECE_460896_SK_BYTES    9442    /* (t+1)*2 + n*2 + 32 = 194 + 9216 + 32 */
+#define MCELIECE_460896_CT_BYTES    188     /* ceil(mt/8) + 32 = 156 + 32 */
 #define MCELIECE_460896_SS_BYTES    32
 
 /* ------------------------------------------------------------------ */
@@ -54,8 +54,8 @@
 #define MCELIECE_6688128_FIELD_SIZE (1 << MCELIECE_6688128_M)  /* 8192 */
 
 #define MCELIECE_6688128_PK_BYTES   1044992
-#define MCELIECE_6688128_SK_BYTES   13932
-#define MCELIECE_6688128_CT_BYTES   240
+#define MCELIECE_6688128_SK_BYTES   13666   /* (t+1)*2 + n*2 + 32 = 258 + 13376 + 32 */
+#define MCELIECE_6688128_CT_BYTES   240     /* ceil(mt/8) + 32 = 208 + 32 */
 #define MCELIECE_6688128_SS_BYTES   32
 
 /* ------------------------------------------------------------------ */
@@ -68,8 +68,8 @@
 #define MCELIECE_6960119_FIELD_SIZE (1 << MCELIECE_6960119_M)  /* 8192 */
 
 #define MCELIECE_6960119_PK_BYTES   1047319
-#define MCELIECE_6960119_SK_BYTES   13948
-#define MCELIECE_6960119_CT_BYTES   226
+#define MCELIECE_6960119_SK_BYTES   14192   /* (t+1)*2 + n*2 + 32 = 240 + 13920 + 32 */
+#define MCELIECE_6960119_CT_BYTES   226     /* ceil(mt/8) + 32 = 194 + 32 */
 #define MCELIECE_6960119_SS_BYTES   32
 
 /* ------------------------------------------------------------------ */
@@ -82,8 +82,8 @@
 #define MCELIECE_8192128_FIELD_SIZE (1 << MCELIECE_8192128_M)  /* 8192 */
 
 #define MCELIECE_8192128_PK_BYTES   1357824
-#define MCELIECE_8192128_SK_BYTES   14120
-#define MCELIECE_8192128_CT_BYTES   240
+#define MCELIECE_8192128_SK_BYTES   16674   /* (t+1)*2 + n*2 + 32 = 258 + 16384 + 32 */
+#define MCELIECE_8192128_CT_BYTES   240     /* ceil(mt/8) + 32 = 208 + 32 */
 #define MCELIECE_8192128_SS_BYTES   32
 
 /* ------------------------------------------------------------------ */

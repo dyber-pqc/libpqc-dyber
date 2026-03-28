@@ -331,6 +331,7 @@ static void bench_print_table_sizes(FILE *f, const char *label,
                                      size_t s2, const char *n2,
                                      size_t s3, const char *n3,
                                      size_t s4, const char *n4) {
+    (void)label;
     fprintf(f, "  Sizes: %s=%zu", n1, s1);
     if (n2) fprintf(f, ", %s=%zu", n2, s2);
     if (n3) fprintf(f, ", %s=%zu", n3, s3);

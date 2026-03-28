@@ -80,7 +80,6 @@ static pqc_status_t ntru_encaps_impl(uint8_t *ct, uint8_t *ss,
 {
     ntru_poly_t r, m;
     uint8_t coin[32];
-    uint8_t hash_input[32 + NTRU_MAX_N]; /* pk_hash + randomness */
 
     /* Generate random coin */
     if (pqc_randombytes(coin, 32) != PQC_OK)

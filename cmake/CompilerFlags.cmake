@@ -5,7 +5,7 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
     # Ensure POSIX + GNU/BSD definitions are available
-    if(NOT APPLE)
+    if(NOT APPLE AND NOT MINGW)
         add_compile_definitions(_POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
     endif()
 
@@ -31,8 +31,8 @@ else()
         add_compile_options(-D_FORTIFY_SOURCE=2)
     endif()
 
-    # Link-time hardening
-    if(NOT APPLE)
+    # Link-time hardening (ELF-only, not for MinGW/Windows)
+    if(NOT APPLE AND NOT WIN32)
         add_link_options(-Wl,-z,relro,-z,now)
     endif()
 endif()

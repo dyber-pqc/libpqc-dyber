@@ -143,27 +143,6 @@ static uint64_t add256(p256_fe r, const p256_fe a, const p256_fe b)
     return carry;
 }
 
-/* Returns borrow (0 or 1) */
-static uint64_t sub256(p256_fe r, const p256_fe a, const p256_fe b)
-{
-    uint64_t borrow = 0;
-    for (int i = 0; i < 4; i++) {
-        uint64_t diff = a[i] - b[i] - borrow;
-        borrow = (a[i] < b[i] + borrow) || (borrow && b[i] == 0xFFFFFFFFFFFFFFFFULL);
-        /* More careful borrow calculation */
-        if (borrow == 0) {
-            borrow = (a[i] < b[i]) ? 1 : 0;
-            diff = a[i] - b[i];
-        } else {
-            /* Had a previous borrow */
-            borrow = (a[i] <= b[i]) ? 1 : 0;
-            diff = a[i] - b[i] - 1;
-        }
-        r[i] = diff;
-    }
-    return borrow;
-}
-
 /* Proper subtraction with borrow */
 uint64_t sub256_v2(p256_fe r, const p256_fe a, const p256_fe b)
 {
@@ -612,28 +591,12 @@ void p256_scalar_mul(p256_fe h, const p256_fe f, const p256_fe g)
     /* We have a 512-bit number in t[0..7]. Reduce mod n (256-bit). */
     /* Simple approach: work with the top half, multiply by (2^256 mod n), add to bottom */
 
-    /* 2^256 mod n */
-    static const p256_fe R_MOD_N = {
-        0x0C46353D039CDAAFULL,
-        0x4319055258E8617BULL,
-        0x0000000000000000ULL,
-        0x00000000FFFFFFFFULL,
-    };
-
     /* Reduce: result = t[0..3] + t[4..7] * (2^256 mod n) */
     p256_fe lo_part = { t[0], t[1], t[2], t[3] };
-    p256_fe hi_part = { t[4], t[5], t[6], t[7] };
 
-    /* Multiply hi_part * R_MOD_N (produces up to 512 bits again, but should be small) */
-    /* For simplicity, use iterative subtraction for correctness */
-    /* This is not performance-critical for our use case */
-
-    /* Use a simpler approach: binary long division */
+    /* Use binary long division / repeated subtraction approach */
     /* Copy 512-bit number into a working buffer */
     p256_fe_copy(h, lo_part);
-
-    /* Add hi_part * R_MOD_N (which is at most ~320 bits) */
-    /* For now, use the simple repeated subtraction */
     uint64_t work[8];
     memcpy(work, t, sizeof(work));
 

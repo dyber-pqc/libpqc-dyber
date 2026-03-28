@@ -137,7 +137,7 @@ int pqc_slhdsa_keygen(uint8_t *pk, uint8_t *sk,
 {
     uint32_t n = p->n;
     uint8_t *sk_seed  = sk;
-    uint8_t *sk_prf   = sk + n;
+    /* sk_prf at sk+n is set by randombytes but not used directly here */
     uint8_t *pk_seed  = sk + 2 * n;
     uint8_t *pk_root  = sk + 3 * n;
     uint8_t addr[32];

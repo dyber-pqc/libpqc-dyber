@@ -265,9 +265,10 @@ set(PQC_INCLUDE_DIRS
 if(PQC_BUILD_STATIC)
     add_library(pqc_static STATIC ${PQC_ALL_SOURCES})
     target_include_directories(pqc_static PUBLIC ${PQC_INCLUDE_DIRS})
-    if(WIN32 AND PQC_BUILD_SHARED)
-        # On Windows, shared lib also produces pqc.lib (import lib),
-        # so name the static lib differently to avoid collision
+    if(MSVC AND PQC_BUILD_SHARED)
+        # On MSVC, shared lib also produces pqc.lib (import lib),
+        # so name the static lib differently to avoid collision.
+        # MinGW uses .dll.a for import libs, so no collision there.
         set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc_static)
     else()
         set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc)
@@ -297,6 +298,15 @@ if(WIN32)
     endif()
     if(PQC_BUILD_SHARED)
         target_link_libraries(pqc_shared PRIVATE bcrypt)
+    endif()
+    # MinGW uses GCC, which needs -lm for math functions (floor, sqrt, etc.)
+    if(MINGW)
+        if(PQC_BUILD_STATIC)
+            target_link_libraries(pqc_static PRIVATE m)
+        endif()
+        if(PQC_BUILD_SHARED)
+            target_link_libraries(pqc_shared PRIVATE m)
+        endif()
     endif()
 else()
     # Link math library on non-Windows platforms (for floor, cos, sin, sqrt in FN-DSA)

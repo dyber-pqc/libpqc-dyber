@@ -18,37 +18,6 @@
 #include "core/common/hash/sha3.h"
 
 /* ------------------------------------------------------------------ */
-/* Sample a single noise value from CDF table                           */
-/*                                                                      */
-/* Given a uniform 16-bit sample, find the noise value e such that      */
-/* CDF[e-1] <= sample < CDF[e]. The sign bit is taken from the MSB     */
-/* of a second uniform byte.                                            */
-/* ------------------------------------------------------------------ */
-
-static int16_t sample_from_cdf(uint16_t uniform_sample, uint8_t sign_bit,
-                                const uint16_t *cdf, uint32_t cdf_len)
-{
-    /* uniform_sample is in [0, 2^15 - 1] (use lower 15 bits) */
-    uint16_t u = uniform_sample & 0x7FFF;
-
-    /* Find the interval: e = number of CDF entries <= u */
-    int16_t e = 0;
-    for (uint32_t i = 0; i < cdf_len; i++) {
-        /* Increment e if CDF[i] <= u (constant-time) */
-        e += (int16_t)(cdf[i] <= u);
-    }
-
-    /* Apply sign: if sign_bit is set, negate */
-    int16_t sign = -((int16_t)(sign_bit & 1)) | 1; /* 1 or -1 */
-    /* Actually: sign_bit=0 -> +e, sign_bit=1 -> -e */
-    if (sign_bit & 1) {
-        e = (int16_t)(-e);
-    }
-
-    return e;
-}
-
-/* ------------------------------------------------------------------ */
 /* Sample a matrix of noise values                                      */
 /*                                                                      */
 /* out: matrix of (rows x cols) uint16_t values (mod q)                */

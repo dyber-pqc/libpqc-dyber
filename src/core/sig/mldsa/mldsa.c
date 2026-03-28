@@ -177,7 +177,6 @@ pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
     pqc_mldsa_polyvecl mat[PQC_MLDSA_K_MAX], s1, y, z;
     pqc_mldsa_polyveck t0, s2, w1, w0, h;
     pqc_mldsa_poly cp;
-    uint8_t w1_packed[PQC_MLDSA_K_MAX * 192]; /* max k * polyw1_packed */
     pqc_shake256_ctx state;
 
     if (!params || !sig || !siglen || !msg || !sk)

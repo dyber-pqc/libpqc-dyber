@@ -264,8 +264,14 @@ static pqc_status_t mayo_sign_impl(uint8_t *sig, size_t *siglen,
     /* Hash message to target */
     mayo_hash_message(target, m, msg, msglen, salt, 16);
 
-    /* Expand secret key to central map and oil subspace */
-    mayo_expand_pk(P, sk, params);
+    /* Derive pk_seed from sk_seed (same derivation as keygen) */
+    {
+        uint8_t pk_seed[64]; /* large enough for any seed_len */
+        pqc_shake256(pk_seed, (size_t)params->seed_len,
+                     sk, (size_t)params->seed_len);
+        mayo_expand_pk(P, pk_seed, params);
+        pqc_memzero(pk_seed, sizeof(pk_seed));
+    }
     mayo_compute_oil_space(oil, sk, params);
 
     /*
