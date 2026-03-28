@@ -71,7 +71,7 @@ jobs:
           run: |
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
             cmake --build build
-            ctest --test-dir build --output-on-failure
+            ctest --test-dir build --output-on-failure --timeout 600
 
   build-macos:
     name: macOS (${{ matrix.arch }}, ${{ matrix.build_type }})
@@ -96,7 +96,7 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --timeout 600
 
   build-windows:
     name: Windows (${{ matrix.generator }}, ${{ matrix.build_type }})
@@ -118,7 +118,7 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }}
       - name: Test
-        run: ctest --test-dir build --output-on-failure -C ${{ matrix.build_type }}
+        run: ctest --test-dir build --output-on-failure --timeout 600 -C ${{ matrix.build_type }}
 
   build-freebsd:
     name: FreeBSD
@@ -133,7 +133,7 @@ jobs:
           run: |
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
             cmake --build build
-            ctest --test-dir build --output-on-failure
+            ctest --test-dir build --output-on-failure --timeout 600
 
   # ============================================================
   # Security & Quality Checks
@@ -518,7 +518,7 @@ jobs:
             -DPQC_ENABLE_ASM=OFF \
             -DPQC_BUILD_TESTS=ON
           cmake --build build
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure --timeout 600
 
   static-only-build:
     name: Static Library Only
@@ -535,7 +535,7 @@ jobs:
             -DPQC_BUILD_STATIC=ON \
             -DPQC_BUILD_TESTS=ON
           cmake --build build
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure --timeout 600
 
   no-asm-build:
     name: Pure C (No ASM)
@@ -551,4 +551,4 @@ jobs:
             -DPQC_ENABLE_ASM=OFF \
             -DPQC_BUILD_TESTS=ON
           cmake --build build
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure --timeout 600
