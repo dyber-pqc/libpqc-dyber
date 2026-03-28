@@ -131,8 +131,6 @@ void pqc_keccak_absorb(uint64_t state[25], size_t rate_bytes,
 void pqc_keccak_squeeze(uint64_t state[25], size_t rate_bytes,
                          uint8_t *out, size_t outlen)
 {
-    size_t rate_lanes = rate_bytes / 8;
-
     while (outlen > 0) {
         size_t block = (outlen < rate_bytes) ? outlen : rate_bytes;
         size_t full_lanes = block / 8;

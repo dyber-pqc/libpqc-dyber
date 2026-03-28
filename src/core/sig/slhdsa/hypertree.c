@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "pqc/common.h"
 #include "slhdsa.h"
 
 /* ------------------------------------------------------------------ */
