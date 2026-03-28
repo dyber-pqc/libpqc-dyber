@@ -7,29 +7,34 @@ add_executable(test_kem unit/test_kem_all.c)
 target_link_libraries(test_kem PRIVATE pqc_static)
 target_include_directories(test_kem PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_kem COMMAND test_kem)
+set_tests_properties(test_kem PROPERTIES TIMEOUT 120)
 
 add_executable(test_sig unit/test_sig_all.c)
 target_link_libraries(test_sig PRIVATE pqc_static)
 target_include_directories(test_sig PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_sig COMMAND test_sig)
+set_tests_properties(test_sig PROPERTIES TIMEOUT 600)
 
 # Hash tests
 add_executable(test_hash unit/test_hash.c)
 target_link_libraries(test_hash PRIVATE pqc_static)
 target_include_directories(test_hash PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_hash COMMAND test_hash)
+set_tests_properties(test_hash PROPERTIES TIMEOUT 30)
 
 # Integration tests
 add_executable(test_integration integration/test_roundtrip.c)
 target_link_libraries(test_integration PRIVATE pqc_static)
 target_include_directories(test_integration PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_integration COMMAND test_integration)
+set_tests_properties(test_integration PROPERTIES TIMEOUT 30)
 
 # Quick FN-DSA test (for development/debugging)
 add_executable(test_fndsa_quick unit/test_fndsa_quick.c)
 target_link_libraries(test_fndsa_quick PRIVATE pqc_static)
 target_include_directories(test_fndsa_quick PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_fndsa_quick COMMAND test_fndsa_quick)
+set_tests_properties(test_fndsa_quick PROPERTIES TIMEOUT 30)
 
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)
