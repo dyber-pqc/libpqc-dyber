@@ -31,14 +31,6 @@ static uint64_t load48(const uint8_t *b)
          | ((uint64_t)b[5] << 40);
 }
 
-static uint64_t load32_le(const uint8_t *b)
-{
-    return ((uint64_t)b[0])
-         | ((uint64_t)b[1] << 8)
-         | ((uint64_t)b[2] << 16)
-         | ((uint64_t)b[3] << 24);
-}
-
 void fe25519_frombytes(fe25519 h, const uint8_t s[32])
 {
     uint64_t h0 = load48(s);
@@ -144,7 +136,7 @@ void fe25519_tobytes(uint8_t s[32], const fe25519 h)
     /* Actually, let's do this the clean way using 128-bit accumulation */
     /* Pack 5 x 51-bit limbs into 32 bytes */
     {
-        uint64_t lo, hi;
+        uint64_t lo;
         /* Limbs: t0 t1 t2 t3 t4, each 51 bits */
         /* Total: 255 bits = 32 bytes (top bit always 0) */
 
@@ -466,7 +458,7 @@ void fe25519_inv(fe25519 out, const fe25519 z)
 
 void fe25519_pow2523(fe25519 out, const fe25519 z)
 {
-    fe25519 t0, t1, t2, t3;
+    fe25519 t0, t1, t2;
 
     fe25519_sq(t0, z);
     fe25519_sq(t1, t0);

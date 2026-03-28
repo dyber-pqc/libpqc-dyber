@@ -141,7 +141,6 @@ static void cbits_rec(uint8_t *out, const uint16_t *pi, int lgs,
 
     /* Input layer control bits: for pair (i, i+half), swap if
      * route_in[i] == 1 (i.e., i goes to bottom) */
-    int bits_per_layer = half;
     int input_layer_offset = offset;
     int output_layer_offset = offset + (2 * lgs - 2) * stride_bits;
 
@@ -226,7 +225,6 @@ static void cbits_rec(uint8_t *out, const uint16_t *pi, int lgs,
     /* Output layer control bits */
     for (int i = 0; i < half; i++) {
         int lo = i;
-        int hi = i + half;
         /* After the sub-networks, lo comes from top, hi from bottom.
          * We need to swap if route_out[lo] == 1. */
         int swap_out = (route_out[lo] == 1) ? 1 : 0;

@@ -96,15 +96,16 @@ int mceliece_encrypt(uint8_t *ct, uint8_t *e,
     int mt = p->m * p->t;
     int n = p->n;
     int k = p->k;
-    int ct_bytes = (mt + 7) / 8;
+    int syn_bytes = (mt + 7) / 8;
     int pk_row_bytes = (k + 7) / 8;
+    int e_bytes = (n + 7) / 8;
 
     /* Generate random weight-t error vector */
     if (gen_error_vector(e, n, p->t) != 0)
         return -1;
 
     /* Compute syndrome: s = H * e */
-    memset(ct, 0, (size_t)ct_bytes);
+    memset(ct, 0, (size_t)p->ct_bytes);
 
     /* s = e_left (first mt bits of e) */
     for (int i = 0; i < mt; i++) {
@@ -125,10 +126,11 @@ int mceliece_encrypt(uint8_t *ct, uint8_t *e,
             uint8_t e_val;
             int shift = mt & 7;
             if (shift == 0) {
-                e_val = e[e_byte_idx];
+                e_val = (e_byte_idx < e_bytes) ? e[e_byte_idx] : 0;
             } else {
-                e_val = (uint8_t)(e[e_byte_idx] >> shift);
-                if (e_byte_idx + 1 < (n + 7) / 8) {
+                e_val = (e_byte_idx < e_bytes)
+                            ? (uint8_t)(e[e_byte_idx] >> shift) : 0;
+                if (e_byte_idx + 1 < e_bytes) {
                     e_val |= (uint8_t)(e[e_byte_idx + 1] << (8 - shift));
                 }
             }
@@ -139,6 +141,18 @@ int mceliece_encrypt(uint8_t *ct, uint8_t *e,
         if (bit & 1) {
             ct[row >> 3] ^= (uint8_t)(1u << (row & 7));
         }
+    }
+
+    /* Append C1 = SHA3-256(2 || e) after the syndrome */
+    {
+        size_t hash_in_len = 1 + (size_t)e_bytes;
+        uint8_t *hash_in = (uint8_t *)calloc(1, hash_in_len);
+        if (!hash_in)
+            return -1;
+        hash_in[0] = 2;
+        memcpy(hash_in + 1, e, (size_t)e_bytes);
+        pqc_sha3_256(ct + syn_bytes, hash_in, hash_in_len);
+        free(hash_in);
     }
 
     return 0;

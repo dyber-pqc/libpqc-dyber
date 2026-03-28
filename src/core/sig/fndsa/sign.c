@@ -134,8 +134,8 @@ ff_sampling(int16_t *s1_out, int16_t *s2_out,
             fndsa_sampler_ctx_t *sampler,
             double sigma, double sigmin)
 {
+    (void)sigmin;
     size_t n = (size_t)1 << logn;
-    size_t hn = n >> 1;
     double f_fft[FNDSA_MAX_N];
     double g_fft[FNDSA_MAX_N];
     double F_fft[FNDSA_MAX_N];
@@ -388,7 +388,6 @@ fndsa_sign(uint8_t *sig, size_t *siglen, size_t sig_max,
     int8_t F_i8[FNDSA_MAX_N];
     int32_t F[FNDSA_MAX_N];
     int32_t G[FNDSA_MAX_N];
-    uint16_t h_dummy[FNDSA_MAX_N]; /* not needed for signing, but for G recovery */
     uint16_t c[FNDSA_MAX_N];
     int16_t s1[FNDSA_MAX_N];
     int16_t s2[FNDSA_MAX_N];

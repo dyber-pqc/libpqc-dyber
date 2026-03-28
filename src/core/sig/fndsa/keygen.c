@@ -35,25 +35,11 @@
 /* ------------------------------------------------------------------ */
 
 static uint16_t
-modq_add(uint16_t a, uint16_t b)
-{
-    uint32_t s = (uint32_t)a + (uint32_t)b;
-    s -= FNDSA_Q & (uint32_t)(-(int32_t)(s >= FNDSA_Q));
-    return (uint16_t)s;
-}
-
-static uint16_t
 modq_sub(uint16_t a, uint16_t b)
 {
     uint32_t s = (uint32_t)a + FNDSA_Q - (uint32_t)b;
     s -= FNDSA_Q & (uint32_t)(-(int32_t)(s >= FNDSA_Q));
     return (uint16_t)s;
-}
-
-static uint16_t
-modq_mul(uint16_t a, uint16_t b)
-{
-    return (uint16_t)((uint32_t)a * (uint32_t)b % FNDSA_Q);
 }
 
 /*

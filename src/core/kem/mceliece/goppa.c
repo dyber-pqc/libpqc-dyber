@@ -28,46 +28,6 @@
  * Simplified approach: generate random monic polynomial and test.
  */
 
-/* Polynomial GCD over GF(2^m)[x] */
-static int poly_gcd_degree(const gf_t *a, int deg_a,
-                           const gf_t *b, int deg_b,
-                           int m)
-{
-    gf_t u[MCELIECE_MAX_T + 1];
-    gf_t v[MCELIECE_MAX_T + 1];
-    int du, dv;
-
-    /* Copy a and b */
-    memcpy(u, a, (size_t)(deg_a + 1) * sizeof(gf_t));
-    memcpy(v, b, (size_t)(deg_b + 1) * sizeof(gf_t));
-    du = deg_a;
-    dv = deg_b;
-
-    while (dv >= 0) {
-        /* u = u mod v */
-        while (du >= dv && du >= 0) {
-            gf_t coeff = gf_frac(u[du], v[dv], m);
-            for (int i = 0; i <= dv; i++) {
-                u[du - dv + i] = gf_add(u[du - dv + i], gf_mul(coeff, v[i], m));
-            }
-            /* Find new degree of u */
-            while (du >= 0 && u[du] == 0)
-                du--;
-        }
-        /* Swap u and v */
-        gf_t tmp[MCELIECE_MAX_T + 1];
-        int td;
-        memcpy(tmp, u, sizeof(tmp));
-        memcpy(u, v, sizeof(u));
-        memcpy(v, tmp, sizeof(v));
-        td = du;
-        du = dv;
-        dv = td;
-    }
-
-    return du;
-}
-
 int goppa_gen_irr_poly(gf_t *g, int t, int m)
 {
     int field_size = 1 << m;

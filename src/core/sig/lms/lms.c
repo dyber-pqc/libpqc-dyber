@@ -45,17 +45,6 @@
 /* LMS type to tree height mapping                                      */
 /* ------------------------------------------------------------------ */
 
-static int lms_type_to_h(uint32_t lms_type)
-{
-    switch (lms_type) {
-    case PQC_LMS_SHA256_M32_H10: return 10;
-    case PQC_LMS_SHA256_M32_H15: return 15;
-    case PQC_LMS_SHA256_M32_H20: return 20;
-    case PQC_LMS_SHA256_M32_H25: return 25;
-    default: return 10;
-    }
-}
-
 /* ------------------------------------------------------------------ */
 /* Key generation                                                       */
 /* ------------------------------------------------------------------ */
@@ -116,8 +105,6 @@ static void lms_compute_auth_path(uint8_t *path, const uint8_t *I,
     for (level = 0; level < h; level++) {
         /* Sibling of node_idx at this level */
         uint32_t sibling = node_idx ^ 1;
-        uint32_t leaf_start = sibling << level;
-        uint32_t leaf_count = (uint32_t)1 << level;
         uint8_t sibling_hash[N];
 
         if (level == 0) {

@@ -148,24 +148,6 @@ static int poly_degree(const uint64_t *v, uint32_t max_words)
     return -1;
 }
 
-/* Shift polynomial left by 1 bit, in place */
-static void poly_shift_left(uint64_t *v, uint32_t words)
-{
-    for (int i = (int)words - 1; i > 0; i--) {
-        v[i] = (v[i] << 1) | (v[i - 1] >> 63);
-    }
-    v[0] <<= 1;
-}
-
-/* Shift polynomial right by 1 bit, in place */
-static void poly_shift_right(uint64_t *v, uint32_t words)
-{
-    for (uint32_t i = 0; i < words - 1; i++) {
-        v[i] = (v[i] >> 1) | (v[i + 1] << 63);
-    }
-    v[words - 1] >>= 1;
-}
-
 int bike_gf2x_inv(uint64_t *o, const uint64_t *a, uint32_t r)
 {
     /*

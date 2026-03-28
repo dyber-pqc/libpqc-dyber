@@ -9,12 +9,11 @@
  * recover the error vector e of weight t.
  *
  * Steps:
- *   1. Compute the syndrome polynomial S(x) from the received syndrome.
- *   2. Compute T(x) = sqrt(S^{-1}(x) + x) mod g(x).
- *   3. Compute the error-locator polynomial sigma(x) = T(x)^2 + x*T(x)^2
- *      using Berlekamp-Massey or direct construction.
- *   4. Find roots of sigma(x) by evaluating at all field elements.
- *   5. The roots give error positions.
+ *   1. Extract GF(2^m) syndromes from the binary syndrome vector.
+ *   2. Build the syndrome polynomial S(x) and compute R(x) = S^{-1}(x) + x.
+ *   3. Compute T(x) = sqrt(R(x)) mod g(x).
+ *   4. Run partial Euclidean algorithm to get error-locator sigma(x).
+ *   5. Find roots of sigma(x) to locate error positions.
  */
 
 #include <stdlib.h>
@@ -131,14 +130,12 @@ static int poly_inv_mod(gf_t *r, const gf_t *a, const gf_t *g, int t, int m)
 
 /*
  * Compute sqrt(a(x)) mod g(x).
- * In GF(2^m)[x]/(g(x)), sqrt(a(x)) = a(x)^(2^(m*t - 1)).
- * But we use a more efficient method: separate even and odd parts.
  *
  * a(x) = a_even(x^2) + x * a_odd(x^2)
- * sqrt(a(x)) = sqrt(a_even(x^2)) + sqrt(x) * sqrt(a_odd(x^2))
- *            = a_even_coeffs(x) + sqrt(x) * a_odd_coeffs(x) mod g(x)
+ * sqrt(a(x)) = a_even_coeffs(x) + sqrt(x) * a_odd_coeffs(x) mod g(x)
  *
- * We need to precompute sqrt(x) mod g(x).
+ * where sqrt of field elements uses gf_sqrt, and sqrt(x) mod g(x)
+ * is precomputed as x^(2^(mt-1)) mod g(x).
  */
 static void poly_sqrt_mod(gf_t *r, const gf_t *a,
                           const gf_t *g, int t, int m)
@@ -162,9 +159,7 @@ static void poly_sqrt_mod(gf_t *r, const gf_t *a,
 
     /*
      * Compute sqrt(x) mod g(x):
-     * We need y such that y^2 = x mod g(x).
      * y = x^(2^(m*t - 1)) mod g(x).
-     * Compute by repeated squaring.
      */
     gf_t base[MCELIECE_MAX_T];
     memset(base, 0, sizeof(base));
@@ -202,68 +197,27 @@ int mceliece_decrypt(uint8_t *e, const uint8_t *ct,
     gf_init_tables(m);
 
     /*
-     * Step 1: Compute syndrome polynomial S(x) from the syndrome bits.
+     * Step 1: Extract the GF(2^m) syndromes from the binary syndrome.
      *
-     * S(x) = sum_{i=0}^{n-1} s_i / (x - alpha_i) mod g(x)
+     * The syndrome ct contains mt bits. These encode t elements of GF(2^m):
+     *   S_i is stored in bits [i*m .. i*m + m - 1] of ct, for i = 0..t-1.
      *
-     * where s_i is the i-th bit of the syndrome vector (after undoing
-     * the systematic form transformation).
-     *
-     * For the systematic form H = [I | T], the syndrome is the first
-     * mt bits. We compute S(x) = sum_{j where s_j=1} 1/(x - alpha_j) mod g.
+     * S(x) = S_0 + S_1*x + ... + S_{t-1}*x^{t-1}
+     * where S_i = sum_{j: e_j=1} alpha_j^i.
      */
     gf_t S[MCELIECE_MAX_T];
     memset(S, 0, sizeof(S));
 
-    for (int j = 0; j < mt; j++) {
-        if (!(ct[j >> 3] & (1u << (j & 7))))
-            continue;
-
-        /* Add 1/(x - alpha_j) to S(x) mod g(x) */
-        gf_t alpha = (gf_t)sk_perm[j];
-        gf_t denom[MCELIECE_MAX_T + 1];
-        memset(denom, 0, sizeof(denom));
-        /* denom = x - alpha = -alpha + x (in GF(2), - = +) */
-        denom[0] = alpha;
-        denom[1] = 1;
-
-        /* We accumulate: S += 1/(x - alpha) mod g
-         * Equivalently: compute the partial fraction sum directly.
-         *
-         * More efficient: use the recursive syndrome formula.
-         * S_k = sum_{j} e_j * alpha_j^k for k=0..t-1
-         */
-    }
-
-    /* Alternative: compute power-sum syndrome S_k = sum e_j * alpha_j^k */
-    gf_t syndromes[MCELIECE_MAX_T];
-    memset(syndromes, 0, sizeof(syndromes));
-
-    for (int j = 0; j < n; j++) {
-        /* Check if bit j is set in the syndrome (extended by T) */
-        int bit_set = 0;
-        if (j < mt) {
-            bit_set = (ct[j >> 3] >> (j & 7)) & 1;
+    for (int i = 0; i < t; i++) {
+        gf_t val = 0;
+        for (int b = 0; b < m; b++) {
+            int bit_pos = i * m + b;
+            if (bit_pos < mt && (ct[bit_pos >> 3] & (1u << (bit_pos & 7)))) {
+                val |= (gf_t)(1u << b);
+            }
         }
-        /* For positions j >= mt, the syndrome contribution comes from
-         * the public key multiplication, which we don't have.
-         * We treat the syndrome as just the ct bits for the first mt positions.
-         */
-        if (!bit_set) continue;
-
-        gf_t alpha = (gf_t)sk_perm[j];
-        gf_t alpha_pow = 1;
-        for (int k = 0; k < t; k++) {
-            syndromes[k] = gf_add(syndromes[k], alpha_pow);
-            alpha_pow = gf_mul(alpha_pow, alpha, m);
-        }
+        S[i] = val;
     }
-
-    /*
-     * Build the syndrome polynomial:
-     * S(x) = S_0 + S_1 * x + ... + S_{t-1} * x^{t-1}
-     */
-    memcpy(S, syndromes, (size_t)t * sizeof(gf_t));
 
     /* Check if syndrome is zero */
     int all_zero = 1;
@@ -276,10 +230,7 @@ int mceliece_decrypt(uint8_t *e, const uint8_t *ct,
     }
 
     /*
-     * Step 2: Compute T(x) such that T(x)^2 + T(x) = S^{-1}(x) + x mod g(x).
-     *
-     * First compute R(x) = S^{-1}(x) mod g(x).
-     * Then compute T(x) = sqrt(R(x) + x) mod g(x).
+     * Step 2: Compute R(x) = S^{-1}(x) + x mod g(x).
      */
     gf_t R[MCELIECE_MAX_T];
     memset(R, 0, sizeof(R));
@@ -302,18 +253,13 @@ int mceliece_decrypt(uint8_t *e, const uint8_t *ct,
     poly_sqrt_mod(T_poly, R, sk_g, t, m);
 
     /*
-     * Step 4: Error-locator polynomial sigma(x) = T(x)^2 + x * T(x) + 1
-     *         ... actually in Patterson's algorithm:
-     *         sigma(x) = a(x)^2 + x * b(x)^2
-     *         where a, b come from partial GCD of (T(x), g(x)).
+     * Step 4: Error-locator polynomial via partial Euclidean algorithm.
      *
-     * Use the key equation: run partial Euclidean algorithm on g(x) and
-     * T(x) until the remainder degree drops below t/2.
-     * Then sigma(x) = r(x)^2 + x * s(x)^2 where r is remainder and
-     * s is the cofactor.
+     * Run extended GCD on g(x) and T(x) until remainder degree < ceil(t/2).
+     * Then sigma(x) = r(x)^2 + x * s(x)^2 where r is the remainder
+     * and s is the cofactor.
      */
 
-    /* Extended GCD / partial Euclidean on g(x) and T(x) */
     gf_t u_poly[MCELIECE_MAX_T + 1], v_poly[MCELIECE_MAX_T + 1];
     gf_t s0_poly[MCELIECE_MAX_T + 1], s1_poly[MCELIECE_MAX_T + 1];
     int du, dv, ds0, ds1;

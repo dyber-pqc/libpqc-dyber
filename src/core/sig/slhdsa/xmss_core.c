@@ -92,16 +92,11 @@ void slhdsa_xmss_sign(uint8_t *sig, uint8_t *root,
 {
     uint32_t n = p->n;
     uint32_t hp = p->hp;
-    uint8_t *wots_sig = sig;
     uint8_t *auth = sig + p->wots_sig_bytes;
     uint32_t i;
 
     /* Build the tree using a treehash-like approach.
      * For each level, compute the authentication path sibling. */
-
-    /* First, compute the leaf (WOTS+ pk) that we are signing with. */
-    uint8_t leaf[SLHDSA_MAX_N];
-    uint8_t wots_msg[SLHDSA_MAX_N]; /* Will be set by caller via the root */
 
     /* Sign the message with WOTS+ at this leaf position */
     slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);

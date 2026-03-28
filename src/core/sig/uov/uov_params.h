@@ -23,7 +23,7 @@
 #define PQC_UOV_IS_O                   44
 #define PQC_UOV_IS_PUBLICKEYBYTES      278432
 #define PQC_UOV_IS_SECRETKEYBYTES      237896
-#define PQC_UOV_IS_SIGBYTES            96
+#define PQC_UOV_IS_SIGBYTES            172
 
 /* ------------------------------------------------------------------ */
 /* UOV-IIIs: (v,o,q) = (160,64,256), Level 3                           */
@@ -35,7 +35,7 @@
 #define PQC_UOV_IIIS_O                 64
 #define PQC_UOV_IIIS_PUBLICKEYBYTES    1225440
 #define PQC_UOV_IIIS_SECRETKEYBYTES    1044320
-#define PQC_UOV_IIIS_SIGBYTES          200
+#define PQC_UOV_IIIS_SIGBYTES          240
 
 /* ------------------------------------------------------------------ */
 /* UOV-Vs: (v,o,q) = (184,72,256), Level 5                             */
@@ -47,7 +47,7 @@
 #define PQC_UOV_VS_O                   72
 #define PQC_UOV_VS_PUBLICKEYBYTES      2869440
 #define PQC_UOV_VS_SECRETKEYBYTES      2436704
-#define PQC_UOV_VS_SIGBYTES            260
+#define PQC_UOV_VS_SIGBYTES            272
 
 /* ------------------------------------------------------------------ */
 /* Maximums for static allocation                                       */

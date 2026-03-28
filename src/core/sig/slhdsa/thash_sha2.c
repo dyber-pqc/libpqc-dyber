@@ -30,21 +30,6 @@
  * is exactly 22 bytes (the address is hashed to save bandwidth).
  * We simplify: compress to n bytes via truncation of SHA-256(ADRS).
  */
-static void compress_addr_sha2(uint8_t *out, const uint8_t addr[32],
-                                uint32_t n)
-{
-    /*
-     * Per FIPS 205 Section 11.1, the compressed address for SHA-2
-     * is formed by taking specific bytes from the ADRS.  For
-     * simplicity and correctness with all parameter sets, we use
-     * the full 32-byte ADRS directly in the hash computations below
-     * (which is equivalent since the hash domain-separates on it).
-     */
-    (void)out;
-    (void)addr;
-    (void)n;
-}
-
 /* ------------------------------------------------------------------ */
 /* thash: T_l(PK.seed, ADRS, M)                                        */
 /*                                                                      */
