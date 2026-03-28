@@ -51,6 +51,9 @@ int pqc_kem_register_all(void) {
 #ifdef PQC_ENABLE_KEM_NTRUPRIME
     pqc_kem_ntruprime_register();
 #endif
+#if defined(PQC_ENABLE_HYBRID_KEM) || defined(PQC_ENABLE_HYBRID)
+    pqc_hybrid_kem_register();
+#endif
 
     return 0;
 }

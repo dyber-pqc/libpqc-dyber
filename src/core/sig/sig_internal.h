@@ -76,7 +76,7 @@ int pqc_sig_xmss_register(void);
 #endif
 
 /* Hybrid SIG registration */
-#ifdef PQC_ENABLE_HYBRID_SIG
+#if defined(PQC_ENABLE_HYBRID_SIG) || defined(PQC_ENABLE_HYBRID)
 int pqc_hybrid_sig_register(void);
 #endif
 

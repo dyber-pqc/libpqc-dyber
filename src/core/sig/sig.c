@@ -60,6 +60,9 @@ int pqc_sig_register_all(void) {
 #ifdef PQC_ENABLE_SIG_XMSS
     pqc_sig_xmss_register();
 #endif
+#if defined(PQC_ENABLE_HYBRID_SIG) || defined(PQC_ENABLE_HYBRID)
+    pqc_hybrid_sig_register();
+#endif
 
     return 0;
 }

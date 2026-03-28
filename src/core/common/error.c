@@ -7,6 +7,7 @@
  */
 
 #include "pqc/common.h"
+#include "pqc/rand.h"
 #include "pqc/pqc_config.h"
 #include "core/common/platform.h"
 
