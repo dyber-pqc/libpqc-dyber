@@ -272,6 +272,8 @@ jobs:
           sha256sum build2/libpqc.a > checksums2.txt
       - name: Compare
         run: |
-          echo "Build 1:" && cat checksums1.txt
-          echo "Build 2:" && cat checksums2.txt
-          diff checksums1.txt checksums2.txt && echo "Builds are reproducible!"
+          HASH1=$(sha256sum build1/libpqc.a | cut -d' ' -f1)
+          HASH2=$(sha256sum build2/libpqc.a | cut -d' ' -f1)
+          echo "Build 1: $HASH1"
+          echo "Build 2: $HASH2"
+          [ "$HASH1" = "$HASH2" ] && echo "Builds are reproducible!" || (echo "MISMATCH!" && exit 1)

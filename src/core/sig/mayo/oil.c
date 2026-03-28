@@ -12,6 +12,7 @@
 
 #include <string.h>
 #include <stdint.h>
+#include "pqc/common.h"
 #include "mayo.h"
 #include "core/common/hash/sha3.h"
 

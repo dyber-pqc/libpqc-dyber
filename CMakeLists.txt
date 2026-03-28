@@ -265,7 +265,13 @@ set(PQC_INCLUDE_DIRS
 if(PQC_BUILD_STATIC)
     add_library(pqc_static STATIC ${PQC_ALL_SOURCES})
     target_include_directories(pqc_static PUBLIC ${PQC_INCLUDE_DIRS})
-    set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc)
+    if(WIN32 AND PQC_BUILD_SHARED)
+        # On Windows, shared lib also produces pqc.lib (import lib),
+        # so name the static lib differently to avoid collision
+        set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc_static)
+    else()
+        set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc)
+    endif()
     target_compile_definitions(pqc_static PRIVATE PQC_BUILD)
 endif()
 
