@@ -4,9 +4,9 @@ if(MSVC)
     add_compile_options(/W4 /WX- /wd4200 /wd4204 /wd4221)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
-    # Ensure POSIX definitions (CLOCK_MONOTONIC, etc.) are available on Linux
+    # Ensure POSIX + GNU/BSD definitions are available
     if(NOT APPLE)
-        add_compile_definitions(_POSIX_C_SOURCE=200809L)
+        add_compile_definitions(_POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
     endif()
 
     add_compile_options(

@@ -41,7 +41,7 @@ static void detect_x86_features(pqc_cpu_features_t *f) {
 
     if (max_leaf >= 1) {
         cpuid(info, 1);
-        f->has_aes_ni = (info[2] >> 25) & 1;
+        f->has_aesni = (info[2] >> 25) & 1;
         f->has_pclmul = (info[2] >> 1) & 1;
     }
 
@@ -50,7 +50,7 @@ static void detect_x86_features(pqc_cpu_features_t *f) {
         f->has_avx2    = (info[1] >> 5) & 1;
         f->has_bmi2    = (info[1] >> 8) & 1;
         f->has_sha_ni  = (info[1] >> 29) & 1;
-        f->has_avx512f = (info[1] >> 16) & 1;
+        f->has_avx512 = (info[1] >> 16) & 1;
     }
 }
 

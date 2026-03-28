@@ -60,12 +60,9 @@ pqc_ct_lt(uint32_t a, uint32_t b)
      *
      * Classic Hacker's Delight / CT crypto pattern.
      */
-    uint32_t d = a - b;
     /* borrow bit: set if a < b */
     uint32_t borrow = (a ^ ((a ^ b) | ((a - b) ^ b)));
     return (borrow >> 31) & 1u;
-
-    (void)d; /* suppress unused warning on some compilers */
 }
 
 uint32_t

@@ -55,7 +55,8 @@ typedef struct pqc_cpu_features {
     uint32_t has_sha3   : 1;  /* ARM SHA3 extension */
     uint32_t has_aes    : 1;  /* ARM AES extension  */
 
-    uint32_t reserved   : 19;
+    uint32_t initialized : 1;
+    uint32_t reserved   : 18;
 } pqc_cpu_features_t;
 
 /*

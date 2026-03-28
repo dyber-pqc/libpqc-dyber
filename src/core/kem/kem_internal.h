@@ -60,7 +60,7 @@ int pqc_kem_ntruprime_register(void);
 #endif
 
 /* Hybrid KEM registration */
-#ifdef PQC_ENABLE_HYBRID_KEM
+#if defined(PQC_ENABLE_HYBRID_KEM) || defined(PQC_ENABLE_HYBRID)
 int pqc_hybrid_kem_register(void);
 #endif
 

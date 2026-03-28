@@ -38,7 +38,8 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DPQC_BUILD_SHARED=ON \
             -DPQC_BUILD_STATIC=ON \
-            -DPQC_BUILD_CLI=ON
+            -DPQC_BUILD_CLI=ON \
+            -DPQC_BUILD_TESTS=ON
           cmake --build build --config Release
       - name: Test
         shell: bash
