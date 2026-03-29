@@ -27,28 +27,34 @@
 /* Parameter definitions                                               */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Size formulas:
+ *   pk_bytes = ct_bytes = ceil(n * log_q / 8)
+ *   sk_bytes = 2 * ceil((n+4)/5) + pk_bytes + 64
+ *     (f_trits + f_inv_3_trits + h_packed + pk_hash + rejection_seed)
+ */
 static const ntru_params_t params_hps2048509 = {
     .n = 509, .q = 2048, .log_q = 11, .is_hrss = 0,
     .weight = 169,
-    .pk_bytes = 699, .sk_bytes = 935, .ct_bytes = 699
+    .pk_bytes = 700, .sk_bytes = 968, .ct_bytes = 700
 };
 
 static const ntru_params_t params_hps2048677 = {
     .n = 677, .q = 2048, .log_q = 11, .is_hrss = 0,
     .weight = 225,
-    .pk_bytes = 930, .sk_bytes = 1234, .ct_bytes = 930
+    .pk_bytes = 931, .sk_bytes = 1267, .ct_bytes = 931
 };
 
 static const ntru_params_t params_hps4096821 = {
     .n = 821, .q = 4096, .log_q = 12, .is_hrss = 0,
     .weight = 273,
-    .pk_bytes = 1230, .sk_bytes = 1590, .ct_bytes = 1230
+    .pk_bytes = 1232, .sk_bytes = 1626, .ct_bytes = 1232
 };
 
 static const ntru_params_t params_hrss701 = {
     .n = 701, .q = 8192, .log_q = 13, .is_hrss = 1,
     .weight = 0,
-    .pk_bytes = 1138, .sk_bytes = 1450, .ct_bytes = 1138
+    .pk_bytes = 1140, .sk_bytes = 1486, .ct_bytes = 1140
 };
 
 /* ------------------------------------------------------------------ */

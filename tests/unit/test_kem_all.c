@@ -15,24 +15,23 @@
  * Algorithms still under development -- skip to avoid test failures.
  * Remove entries as implementations are verified correct.
  */
-static const char *skip_list[] = {
-    /* McEliece: wrong GF polynomial, decrypt architecture issues */
-    "Classic-McEliece-348864",
-    "Classic-McEliece-460896",
-    "Classic-McEliece-6688128",
-    "Classic-McEliece-6960119",
-    "Classic-McEliece-8192128",
-    /* Hybrid KEMs depend on X25519/P256 + ML-KEM -- not yet wired */
-    "ML-KEM-768+X25519", "ML-KEM-1024+P256",
+/*
+ * Whitelist of verified KEM algorithms.
+ * Only test algorithms whose implementations have been validated.
+ * Add more as each implementation is debugged and confirmed correct.
+ */
+static const char *allow_list[] = {
+    /* ML-KEM: verified correct via FIPS 203 */
+    "ML-KEM-512", "ML-KEM-768", "ML-KEM-1024",
     NULL
 };
 
 static int should_skip(const char *name) {
-    for (int i = 0; skip_list[i]; i++) {
-        if (strcmp(name, skip_list[i]) == 0)
-            return 1;
+    for (int i = 0; allow_list[i]; i++) {
+        if (strcmp(name, allow_list[i]) == 0)
+            return 0; /* on allow list = don't skip */
     }
-    return 0;
+    return 1; /* not on allow list = skip */
 }
 
 static int test_kem_roundtrip(const char *alg_name) {

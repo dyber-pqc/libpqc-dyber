@@ -35,34 +35,41 @@
 /* Parameter definitions                                               */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Size formulas (using simple 2-byte-per-coefficient encoding):
+ *   pk_bytes = p * 2       (encode_rq writes 2 bytes per coefficient)
+ *   ct_bytes = p * 2 + 32  (encoded ciphertext + confirmation hash)
+ *   sk_bytes = 2*ceil((p+4)/5) + pk_bytes + 64
+ *     (f_small + ginv_small + pk_copy + pk_hash + rejection_seed)
+ */
 static const sntrup_params_t params_761 = {
     .p = 761, .q = 4591, .w = 286,
-    .round_bytes = 1007, .small_bytes = 191,
-    .pk_bytes = 1158, .sk_bytes = 1763, .ct_bytes = 1039, .ss_bytes = 32
+    .round_bytes = 1007, .small_bytes = 153,
+    .pk_bytes = 1522, .sk_bytes = 1892, .ct_bytes = 1554, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_857 = {
     .p = 857, .q = 5167, .w = 322,
-    .round_bytes = 1152, .small_bytes = 215,
-    .pk_bytes = 1322, .sk_bytes = 1999, .ct_bytes = 1184, .ss_bytes = 32
+    .round_bytes = 1152, .small_bytes = 172,
+    .pk_bytes = 1714, .sk_bytes = 2122, .ct_bytes = 1746, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_953 = {
     .p = 953, .q = 6343, .w = 396,
-    .round_bytes = 1317, .small_bytes = 239,
-    .pk_bytes = 1505, .sk_bytes = 2254, .ct_bytes = 1349, .ss_bytes = 32
+    .round_bytes = 1317, .small_bytes = 191,
+    .pk_bytes = 1906, .sk_bytes = 2352, .ct_bytes = 1938, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_1013 = {
     .p = 1013, .q = 7177, .w = 448,
-    .round_bytes = 1423, .small_bytes = 254,
-    .pk_bytes = 1623, .sk_bytes = 2417, .ct_bytes = 1455, .ss_bytes = 32
+    .round_bytes = 1423, .small_bytes = 203,
+    .pk_bytes = 2026, .sk_bytes = 2496, .ct_bytes = 2058, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_1277 = {
     .p = 1277, .q = 7879, .w = 492,
-    .round_bytes = 1815, .small_bytes = 320,
-    .pk_bytes = 2067, .sk_bytes = 3059, .ct_bytes = 1847, .ss_bytes = 32
+    .round_bytes = 1815, .small_bytes = 256,
+    .pk_bytes = 2554, .sk_bytes = 3130, .ct_bytes = 2586, .ss_bytes = 32
 };
 
 /* ------------------------------------------------------------------ */
