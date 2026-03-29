@@ -104,13 +104,17 @@ jobs:
             -DPQC_BUILD_BENCHMARKS=ON `
             -DPQC_BUILD_TESTS=ON
 
+      - name: Setup MSVC for Clang (Windows)
+        if: runner.os == 'Windows' && matrix.compiler == 'clang'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure (Windows Clang)
         if: runner.os == 'Windows' && matrix.compiler == 'clang'
         run: |
           cmake -B build -G "Ninja" `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_C_COMPILER=clang `
-            -DCMAKE_CXX_COMPILER=clang++ `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
             -DPQC_BUILD_BENCHMARKS=ON `
             -DPQC_BUILD_TESTS=ON
 

@@ -22,16 +22,7 @@ static const char *skip_list[] = {
     "Classic-McEliece-6688128",
     "Classic-McEliece-6960119",
     "Classic-McEliece-8192128",
-    /* HQC/BIKE/Frodo/NTRU: heap corruption under investigation */
-    "HQC-128", "HQC-192", "HQC-256",
-    "BIKE-L1", "BIKE-L3", "BIKE-L5",
-    "FrodoKEM-640-AES", "FrodoKEM-640-SHAKE",
-    "FrodoKEM-976-AES", "FrodoKEM-976-SHAKE",
-    "FrodoKEM-1344-AES", "FrodoKEM-1344-SHAKE",
-    "NTRU-HPS-2048-509", "NTRU-HPS-2048-677",
-    "NTRU-HPS-4096-821", "NTRU-HRSS-701",
-    "sntrup761", "sntrup857", "sntrup953", "sntrup1013", "sntrup1277",
-    /* Hybrid KEMs depend on X25519/P256 + ML-KEM */
+    /* Hybrid KEMs depend on X25519/P256 + ML-KEM -- not yet wired */
     "ML-KEM-768+X25519", "ML-KEM-1024+P256",
     NULL
 };
