@@ -18,20 +18,15 @@ static const uint8_t test_message[] = "libpqc-dyber test message for signature v
  * Remove entries as implementations are verified correct.
  */
 static const char *skip_list[] = {
-    /* FN-DSA: NTRU solver base case issues */
+    /* FN-DSA: NTRU solver base case issues, keygen returns -10 */
     "FN-DSA-512", "FN-DSA-1024",
-    /* MAYO/UOV/SNOVA: MQ scheme issues under investigation */
+    /* MAYO/UOV: MQ scheme issues under investigation */
     "MAYO-1", "MAYO-2", "MAYO-3", "MAYO-5",
     "UOV-Is", "UOV-IIIs", "UOV-Vs",
-    "SNOVA-24-5-4", "SNOVA-25-8-3", "SNOVA-28-17-3",
-    /* CROSS: commit-and-prove verification issues */
-    "CROSS-RSDP-128-fast", "CROSS-RSDP-128-small",
-    "CROSS-RSDP-192-fast", "CROSS-RSDP-192-small",
-    "CROSS-RSDP-256-fast", "CROSS-RSDP-256-small",
-    /* LMS/XMSS: stateful scheme verify issues */
-    "LMS-SHA256-H10", "LMS-SHA256-H15", "LMS-SHA256-H20", "LMS-SHA256-H25",
-    "XMSS-SHA2-10-256", "XMSS-SHA2-16-256", "XMSS-SHA2-20-256",
-    /* Hybrid sigs depend on Ed25519/P256 + ML-DSA */
+    /* LMS/XMSS large tree heights: skip to avoid CI timeout (keygen too slow) */
+    "LMS-SHA256-H20", "LMS-SHA256-H25",
+    "XMSS-SHA2-20-256",
+    /* Hybrid sigs depend on Ed25519/P256 + ML-DSA -- not yet wired */
     "ML-DSA-65+Ed25519", "ML-DSA-87+P256",
     NULL
 };
