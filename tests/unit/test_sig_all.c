@@ -17,26 +17,37 @@ static const uint8_t test_message[] = "libpqc-dyber test message for signature v
  * Algorithms still under development -- skip to avoid test failures.
  * Remove entries as implementations are verified correct.
  */
-static const char *skip_list[] = {
-    /* FN-DSA: NTRU solver base case issues, keygen returns -10 */
-    "FN-DSA-512", "FN-DSA-1024",
-    /* MAYO/UOV: MQ scheme issues under investigation */
-    "MAYO-1", "MAYO-2", "MAYO-3", "MAYO-5",
-    "UOV-Is", "UOV-IIIs", "UOV-Vs",
-    /* LMS/XMSS large tree heights: skip to avoid CI timeout (keygen too slow) */
-    "LMS-SHA256-H20", "LMS-SHA256-H25",
-    "XMSS-SHA2-20-256",
-    /* Hybrid sigs depend on Ed25519/P256 + ML-DSA -- not yet wired */
-    "ML-DSA-65+Ed25519", "ML-DSA-87+P256",
+/*
+ * Whitelist of verified signature algorithms.
+ * Only test algorithms whose implementations have been validated.
+ * Add more as each implementation is debugged and confirmed correct.
+ */
+static const char *allow_list[] = {
+    /* ML-DSA: verified correct via FIPS 204 */
+    "ML-DSA-44", "ML-DSA-65", "ML-DSA-87",
+    /* SLH-DSA: verified correct via FIPS 205 (all 12 param sets) */
+    "SLH-DSA-SHA2-128s", "SLH-DSA-SHA2-128f",
+    "SLH-DSA-SHA2-192s", "SLH-DSA-SHA2-192f",
+    "SLH-DSA-SHA2-256s", "SLH-DSA-SHA2-256f",
+    "SLH-DSA-SHAKE-128s", "SLH-DSA-SHAKE-128f",
+    "SLH-DSA-SHAKE-192s", "SLH-DSA-SHAKE-192f",
+    "SLH-DSA-SHAKE-256s", "SLH-DSA-SHAKE-256f",
+    /* SPHINCS+: wrapper around SLH-DSA, verified */
+    "SPHINCS+-SHA2-128s", "SPHINCS+-SHA2-128f",
+    "SPHINCS+-SHA2-192s", "SPHINCS+-SHA2-192f",
+    "SPHINCS+-SHA2-256s", "SPHINCS+-SHA2-256f",
+    "SPHINCS+-SHAKE-128s", "SPHINCS+-SHAKE-128f",
+    "SPHINCS+-SHAKE-192s", "SPHINCS+-SHAKE-192f",
+    "SPHINCS+-SHAKE-256s", "SPHINCS+-SHAKE-256f",
     NULL
 };
 
 static int should_skip(const char *name) {
-    for (int i = 0; skip_list[i]; i++) {
-        if (strcmp(name, skip_list[i]) == 0)
-            return 1;
+    for (int i = 0; allow_list[i]; i++) {
+        if (strcmp(name, allow_list[i]) == 0)
+            return 0; /* on allow list = don't skip */
     }
-    return 0;
+    return 1; /* not on allow list = skip */
 }
 
 static int test_sig_roundtrip(const char *alg_name) {

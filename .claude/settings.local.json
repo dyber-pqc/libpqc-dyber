@@ -143,7 +143,23 @@
       "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && ASAN_OPTIONS=detect_leaks=0 ./build-asan/tests/test_kem\")",
       "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && rm -rf build-wsl && cmake -B build-wsl -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=OFF 2>&1 | tail -1 && cmake --build build-wsl -j4 2>&1 | tail -1 && timeout 60 ./build-wsl/tests/test_kem 2>&1 | head -15\")",
       "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 120 ./build-wsl/tests/test_kem 2>&1 | grep -E ''PASS|FAIL''\")",
-      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 120 ./build-wsl/tests/test_kem 2>&1\")"
+      "Bash(wsl -d Ubuntu-24.04 -- bash -c \"cd /mnt/h/libpqc-dyber && timeout 120 ./build-wsl/tests/test_kem 2>&1\")",
+      "Bash(cmake -B build -G \"Visual Studio 17 2022\" -DPQC_BUILD_TESTS=ON -DPQC_BUILD_SHARED=ON -DPQC_BUILD_STATIC=ON)",
+      "Bash(curl -s \"https://api.github.com/repos/dyber-pqc/libpqc-dyber/actions/runs?per_page=6\")",
+      "Bash(python3 -c \":*)",
+      "Bash(python -c \":*)",
+      "Bash(curl -s \"https://api.github.com/repos/dyber-pqc/libpqc-dyber/actions/runs?per_page=20\")",
+      "Bash(curl -s \"https://api.github.com/repos/dyber-pqc/libpqc-dyber/actions/runs?per_page=3\")",
+      "Bash(curl -s \"https://api.github.com/repos/dyber-pqc/libpqc-dyber/actions/runs/23690314912/jobs?per_page=30\")",
+      "Bash(./build/tests/Debug/test_integration.exe)",
+      "Bash(sed -i 's|ctest --test-dir build --output-on-failure$|ctest --test-dir build --output-on-failure --timeout 600|g' .github/workflows/ci.yml)",
+      "Bash(sed -i 's|ctest --test-dir build --output-on-failure -C|ctest --test-dir build --output-on-failure --timeout 600 -C|g' .github/workflows/ci.yml)",
+      "Bash(ls -d H:/libpqc-dyber/bindings/*/)",
+      "Bash(PYTHONIOENCODING=utf-8 python -c \":*)",
+      "Bash(cmake -B build -G \"Visual Studio 17 2022\" -DPQC_BUILD_TESTS=ON -DPQC_BUILD_SHARED=ON -DPQC_BUILD_BENCHMARKS=OFF)",
+      "Bash(./build/tests/Debug/test_fndsa_quick.exe)",
+      "Bash(cmake --build build --config Debug --target test_sig)",
+      "Bash(cmake --build build --config Debug --target test_kem test_sig)"
     ]
   }
 }
