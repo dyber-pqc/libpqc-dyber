@@ -204,7 +204,11 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
     slhdsa_prf_msg(sig_ptr, sk_prf, opt_rand, msg, msglen, p);
     /* sig_ptr[0..n-1] is now R */
 
-    /* Compute message digest */
+    /* Compute message digest.
+     * Zero the buffer first: split_digest may read more bytes than
+     * hash_msg writes (ka_bytes + tree_bytes + leaf_bytes can exceed
+     * ceil((k*a + h)/8) due to byte-boundary rounding). */
+    memset(digest, 0, sizeof(digest));
     slhdsa_hash_msg(digest, sig_ptr, pk, msg, msglen, p);
 
     sig_ptr += n; /* advance past R */
@@ -270,7 +274,11 @@ int pqc_slhdsa_verify(const uint8_t *msg, size_t msglen,
     fors_sig = sig + n;
     ht_sig = sig + n + p->fors_sig_bytes;
 
-    /* Compute message digest */
+    /* Compute message digest.
+     * Zero the buffer first: split_digest may read more bytes than
+     * hash_msg writes (ka_bytes + tree_bytes + leaf_bytes can exceed
+     * ceil((k*a + h)/8) due to byte-boundary rounding). */
+    memset(digest, 0, sizeof(digest));
     slhdsa_hash_msg(digest, r, pk, msg, msglen, p);
 
     /* Split digest */
