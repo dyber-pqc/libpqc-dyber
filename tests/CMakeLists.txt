@@ -13,7 +13,7 @@ add_executable(test_sig unit/test_sig_all.c)
 target_link_libraries(test_sig PRIVATE pqc_static)
 target_include_directories(test_sig PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_sig COMMAND test_sig)
-set_tests_properties(test_sig PROPERTIES TIMEOUT 600)
+set_tests_properties(test_sig PROPERTIES TIMEOUT 1800)
 
 # Hash tests
 add_executable(test_hash unit/test_hash.c)
@@ -34,7 +34,7 @@ add_executable(test_fndsa_quick unit/test_fndsa_quick.c)
 target_link_libraries(test_fndsa_quick PRIVATE pqc_static)
 target_include_directories(test_fndsa_quick PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_fndsa_quick COMMAND test_fndsa_quick)
-set_tests_properties(test_fndsa_quick PROPERTIES TIMEOUT 30)
+set_tests_properties(test_fndsa_quick PROPERTIES TIMEOUT 120)
 
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)

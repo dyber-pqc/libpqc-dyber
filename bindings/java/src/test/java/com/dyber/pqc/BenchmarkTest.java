@@ -69,16 +69,18 @@ public class BenchmarkTest {
             try { baseIters = Integer.parseInt(args[0]); } catch (NumberFormatException ignored) {}
         }
 
-        PqcLibrary.init();
+        PQC.init();
 
         System.out.println("language,algorithm,operation,iterations,"
             + "min_ms,max_ms,mean_ms,median_ms,stddev_ms,ops_per_sec,"
             + "pk_bytes,sk_bytes");
 
         // KEM benchmarks
-        for (String name : PqcLibrary.kemAlgorithmNames()) {
+        int kemCount = PQC.kemAlgorithmCount();
+        for (int idx = 0; idx < kemCount; idx++) {
+            String name = PQC.kemAlgorithmName(idx);
             int iters = adjustedIterations(name, baseIters);
-            Kem kem = new Kem(name);
+            KEM kem = new KEM(name);
             long pkSize = kem.publicKeySize();
             long skSize = kem.secretKeySize();
 
@@ -96,20 +98,20 @@ public class BenchmarkTest {
             printCsvRow(name, "keygen", iters, computeStats(samples), pkSize, skSize);
 
             // Encaps
-            Kem.KeyPair kp = kem.keygen();
+            KEM.KeyPair kp = kem.keygen();
             for (int i = 0; i < iters; i++) {
                 long t0 = System.nanoTime();
-                kem.encaps(kp.publicKey());
+                kem.encaps(kp.publicKey);
                 long t1 = System.nanoTime();
                 samples[i] = (t1 - t0) / 1_000_000.0;
             }
             printCsvRow(name, "encaps", iters, computeStats(samples), pkSize, skSize);
 
             // Decaps
-            Kem.EncapsResult er = kem.encaps(kp.publicKey());
+            KEM.EncapsResult er = kem.encaps(kp.publicKey);
             for (int i = 0; i < iters; i++) {
                 long t0 = System.nanoTime();
-                kem.decaps(er.ciphertext(), kp.secretKey());
+                kem.decaps(er.ciphertext, kp.secretKey);
                 long t1 = System.nanoTime();
                 samples[i] = (t1 - t0) / 1_000_000.0;
             }
@@ -122,7 +124,9 @@ public class BenchmarkTest {
         byte[] msg = new byte[1024];
         for (int i = 0; i < msg.length; i++) msg[i] = (byte) (i * 137 + 42);
 
-        for (String name : PqcLibrary.sigAlgorithmNames()) {
+        int sigCount = PQC.sigAlgorithmCount();
+        for (int idx = 0; idx < sigCount; idx++) {
+            String name = PQC.sigAlgorithmName(idx);
             int iters = adjustedIterations(name, baseIters);
             Signature sig = new Signature(name);
             long pkSize = sig.publicKeySize();
@@ -148,17 +152,17 @@ public class BenchmarkTest {
             Signature.KeyPair kp = sig.keygen();
             for (int i = 0; i < iters; i++) {
                 long t0 = System.nanoTime();
-                sig.sign(msg, kp.secretKey());
+                sig.sign(msg, kp.secretKey);
                 long t1 = System.nanoTime();
                 samples[i] = (t1 - t0) / 1_000_000.0;
             }
             printCsvRow(name, "sign(1KB)", iters, computeStats(samples), pkSize, skSize);
 
             // Verify
-            byte[] signature = sig.sign(msg, kp.secretKey());
+            byte[] signature = sig.sign(msg, kp.secretKey);
             for (int i = 0; i < iters; i++) {
                 long t0 = System.nanoTime();
-                sig.verify(msg, signature, kp.publicKey());
+                sig.verify(msg, signature, kp.publicKey);
                 long t1 = System.nanoTime();
                 samples[i] = (t1 - t0) / 1_000_000.0;
             }
@@ -167,6 +171,6 @@ public class BenchmarkTest {
             sig.close();
         }
 
-        PqcLibrary.cleanup();
+        PQC.cleanup();
     }
 }

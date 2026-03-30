@@ -59,7 +59,12 @@ namespace Dyber.PQC
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern int pqc_kem_is_enabled(
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string algorithm);
+#if NET5_0_OR_GREATER
+            [MarshalAs(UnmanagedType.LPUTF8Str)]
+#else
+            [MarshalAs(UnmanagedType.LPStr)]
+#endif
+            string algorithm);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern int pqc_sig_algorithm_count();
@@ -69,7 +74,12 @@ namespace Dyber.PQC
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern int pqc_sig_is_enabled(
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string algorithm);
+#if NET5_0_OR_GREATER
+            [MarshalAs(UnmanagedType.LPUTF8Str)]
+#else
+            [MarshalAs(UnmanagedType.LPStr)]
+#endif
+            string algorithm);
 
         // ------------------------------------------------------------------ //
         // KEM context
@@ -77,7 +87,12 @@ namespace Dyber.PQC
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr pqc_kem_new(
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string algorithm);
+#if NET5_0_OR_GREATER
+            [MarshalAs(UnmanagedType.LPUTF8Str)]
+#else
+            [MarshalAs(UnmanagedType.LPStr)]
+#endif
+            string algorithm);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void pqc_kem_free(IntPtr kem);
@@ -117,7 +132,12 @@ namespace Dyber.PQC
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern IntPtr pqc_sig_new(
-            [MarshalAs(UnmanagedType.LPUTF8Str)] string algorithm);
+#if NET5_0_OR_GREATER
+            [MarshalAs(UnmanagedType.LPUTF8Str)]
+#else
+            [MarshalAs(UnmanagedType.LPStr)]
+#endif
+            string algorithm);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void pqc_sig_free(IntPtr sig);

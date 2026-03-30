@@ -11,9 +11,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using Dyber.Pqc;
+using Dyber.PQC;
 
-namespace Dyber.Pqc.Benchmarks
+namespace Dyber.PQC.Benchmarks
 {
     class Program
     {
@@ -63,7 +63,7 @@ namespace Dyber.Pqc.Benchmarks
             if (args.Length > 0 && int.TryParse(args[0], out int parsed))
                 baseIters = parsed;
 
-            PqcLibrary.Init();
+            NativeMethods.pqc_init();
 
             Console.WriteLine("language,algorithm,operation,iterations," +
                 "min_ms,max_ms,mean_ms,median_ms,stddev_ms,ops_per_sec," +
@@ -73,10 +73,10 @@ namespace Dyber.Pqc.Benchmarks
             double ticksToMs = 1000.0 / Stopwatch.Frequency;
 
             // KEM benchmarks
-            foreach (string name in PqcLibrary.KemAlgorithmNames())
+            foreach (string name in Algorithm.GetKemAlgorithms())
             {
                 int iters = AdjustedIters(name, baseIters);
-                using var kem = new Kem(name);
+                using var kem = new KEM(name);
                 long pkSize = kem.PublicKeySize;
                 long skSize = kem.SecretKeySize;
 
@@ -121,7 +121,7 @@ namespace Dyber.Pqc.Benchmarks
             byte[] msg = new byte[1024];
             for (int i = 0; i < msg.Length; i++) msg[i] = (byte)(i * 137 + 42);
 
-            foreach (string name in PqcLibrary.SigAlgorithmNames())
+            foreach (string name in Algorithm.GetSignatureAlgorithms())
             {
                 int iters = AdjustedIters(name, baseIters);
                 using var sig = new Signature(name);
@@ -165,7 +165,7 @@ namespace Dyber.Pqc.Benchmarks
                 PrintRow(name, "verify(1KB)", iters, ComputeStats(samples), pkSize, skSize);
             }
 
-            PqcLibrary.Cleanup();
+            NativeMethods.pqc_cleanup();
         }
     }
 }
