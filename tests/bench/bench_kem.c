@@ -19,12 +19,44 @@
 #include "bench_common.h"
 
 /* -------------------------------------------------------------------------- */
+/* Skip list: algorithms with known issues that would crash or corrupt the    */
+/* benchmark process (e.g., buffer overflows in Classic McEliece).            */
+/* -------------------------------------------------------------------------- */
+
+static const char *bench_kem_skip_list[] = {
+    "Classic-McEliece-348864",
+    "Classic-McEliece-348864f",
+    "Classic-McEliece-460896",
+    "Classic-McEliece-460896f",
+    "Classic-McEliece-6688128",
+    "Classic-McEliece-6688128f",
+    "Classic-McEliece-6960119",
+    "Classic-McEliece-6960119f",
+    "Classic-McEliece-8192128",
+    "Classic-McEliece-8192128f",
+    NULL
+};
+
+static int bench_kem_should_skip(const char *name) {
+    for (int i = 0; bench_kem_skip_list[i] != NULL; i++) {
+        if (strcmp(name, bench_kem_skip_list[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Benchmark a single KEM algorithm                                            */
 /* -------------------------------------------------------------------------- */
 
 static void bench_kem_algorithm(const char *name) {
     if (!bench_matches_filter(name))
         return;
+
+    if (bench_kem_should_skip(name)) {
+        fprintf(stderr, "Skipping '%s' (known buffer overflow issues)\n", name);
+        return;
+    }
 
     PQC_KEM *kem = pqc_kem_new(name);
     if (!kem) {

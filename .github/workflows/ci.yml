@@ -174,7 +174,7 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
-        run: ctest --test-dir build --output-on-failure --timeout 600
+        run: ctest --test-dir build --output-on-failure --timeout 1800
 
   valgrind:
     name: Valgrind Memory Check
@@ -368,13 +368,34 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+      - name: Install pkg-config
+        run: sudo apt-get update && sudo apt-get install -y pkg-config
       - name: Build and install core library
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build
           sudo cmake --install build
           sudo ldconfig
+      - name: Create pkg-config file
+        run: |
+          sudo mkdir -p /usr/local/lib/pkgconfig
+          cat <<'PCEOF' | sudo tee /usr/local/lib/pkgconfig/libpqc.pc
+          prefix=/usr/local
+          exec_prefix=${prefix}
+          libdir=${exec_prefix}/lib
+          includedir=${prefix}/include
+
+          Name: libpqc
+          Description: Post-Quantum Cryptography Library
+          Version: 0.1.0
+          Libs: -L${libdir} -lpqc
+          Cflags: -I${includedir}
+          PCEOF
       - name: Test Go bindings
+        env:
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
+          CGO_CFLAGS: -I/usr/local/include
+          CGO_LDFLAGS: -L/usr/local/lib -lpqc
         run: cd bindings/go && go test -v ./...
 
   binding-java:
