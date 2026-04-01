@@ -12,7 +12,9 @@ import (
 )
 
 func BenchmarkKEM(b *testing.B) {
-	for _, name := range KEMAlgorithmNames() {
+	count := KEMAlgorithmCount()
+	for idx := 0; idx < count; idx++ {
+		name := KEMAlgorithmName(idx)
 		kem, err := NewKEM(name)
 		if err != nil {
 			continue
@@ -58,7 +60,7 @@ func BenchmarkKEM(b *testing.B) {
 			}
 		})
 
-		kem.Free()
+		kem.Close()
 	}
 }
 
@@ -68,14 +70,16 @@ func BenchmarkSignature(b *testing.B) {
 		msg[i] = byte(i*137 + 42)
 	}
 
-	for _, name := range SigAlgorithmNames() {
-		sig, err := NewSignature(name)
+	count := SigAlgorithmCount()
+	for idx := 0; idx < count; idx++ {
+		name := SigAlgorithmName(idx)
+		sig, err := NewSig(name)
 		if err != nil {
 			continue
 		}
 
 		if sig.IsStateful() {
-			sig.Free()
+			sig.Close()
 			continue
 		}
 
@@ -91,7 +95,7 @@ func BenchmarkSignature(b *testing.B) {
 
 		pk, sk, err := sig.Keygen()
 		if err != nil {
-			sig.Free()
+			sig.Close()
 			continue
 		}
 
@@ -107,7 +111,7 @@ func BenchmarkSignature(b *testing.B) {
 
 		signature, err := sig.Sign(msg, sk)
 		if err != nil {
-			sig.Free()
+			sig.Close()
 			continue
 		}
 
@@ -121,6 +125,6 @@ func BenchmarkSignature(b *testing.B) {
 			}
 		})
 
-		sig.Free()
+		sig.Close()
 	}
 }
