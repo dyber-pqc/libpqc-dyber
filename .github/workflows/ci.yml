@@ -174,7 +174,13 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
-        run: ctest --test-dir build --output-on-failure --timeout 1800
+        run: |
+          if [ "${{ matrix.sanitizer }}" = "memory" ]; then
+            # MSan makes SLH-DSA signature tests extremely slow; skip test_sig
+            ctest --test-dir build --output-on-failure --timeout 1800 --exclude-regex "test_sig"
+          else
+            ctest --test-dir build --output-on-failure --timeout 1800
+          fi
 
   valgrind:
     name: Valgrind Memory Check
@@ -339,7 +345,7 @@ jobs:
           sudo cmake --install build
           sudo ldconfig
       - name: Install Python bindings
-        run: pip install ./bindings/python
+        run: pip install ./bindings/python pytest
       - name: Test Python bindings
         run: python -m pytest bindings/python/tests/ -v
 
