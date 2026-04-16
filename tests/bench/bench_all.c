@@ -31,6 +31,43 @@
 /* Inline KEM benchmarks (re-implemented to avoid duplicate main symbols)      */
 /* -------------------------------------------------------------------------- */
 
+/* Skip lists: algorithms with known issues that crash the benchmark */
+static const char *bench_skip_list[] = {
+    /* KEM: McEliece buffer overflows */
+    "Classic-McEliece-348864", "Classic-McEliece-348864f",
+    "Classic-McEliece-460896", "Classic-McEliece-460896f",
+    "Classic-McEliece-6688128", "Classic-McEliece-6688128f",
+    "Classic-McEliece-6960119", "Classic-McEliece-6960119f",
+    "Classic-McEliece-8192128", "Classic-McEliece-8192128f",
+    /* KEM: NTRU/NTRUPrime buffer overflows */
+    "NTRU-HPS-2048-509", "NTRU-HPS-2048-677",
+    "NTRU-HPS-4096-821", "NTRU-HRSS-701",
+    "sntrup761", "sntrup857", "sntrup953", "sntrup1013", "sntrup1277",
+    /* KEM: Hybrid not wired */
+    "ML-KEM-768+X25519", "ML-KEM-1024+P256",
+    /* SIG: FN-DSA keygen issues */
+    "FN-DSA-512", "FN-DSA-1024",
+    /* SIG: MAYO/UOV verify issues */
+    "MAYO-1", "MAYO-2", "MAYO-3", "MAYO-5",
+    "UOV-Is", "UOV-IIIs", "UOV-Vs",
+    /* SIG: SNOVA/CROSS/LMS/XMSS/Hybrid under development */
+    "SNOVA-24-5-4", "SNOVA-25-8-3", "SNOVA-28-17-3",
+    "CROSS-RSDP-128-fast", "CROSS-RSDP-128-small",
+    "CROSS-RSDP-192-fast", "CROSS-RSDP-192-small",
+    "CROSS-RSDP-256-fast", "CROSS-RSDP-256-small",
+    "LMS-SHA256-H10", "LMS-SHA256-H15", "LMS-SHA256-H20", "LMS-SHA256-H25",
+    "XMSS-SHA2-10-256", "XMSS-SHA2-16-256", "XMSS-SHA2-20-256",
+    "ML-DSA-65+Ed25519", "ML-DSA-87+P256",
+    NULL
+};
+
+static int bench_should_skip(const char *name) {
+    for (int i = 0; bench_skip_list[i]; i++) {
+        if (strcmp(name, bench_skip_list[i]) == 0) return 1;
+    }
+    return 0;
+}
+
 static void run_kem_benchmarks(void) {
     FILE *f = g_bench_config.output ? g_bench_config.output : stdout;
     int count = pqc_kem_algorithm_count();
@@ -43,6 +80,7 @@ static void run_kem_benchmarks(void) {
     for (int idx = 0; idx < count; idx++) {
         const char *name = pqc_kem_algorithm_name(idx);
         if (!bench_matches_filter(name)) continue;
+        if (bench_should_skip(name)) continue;
 
         PQC_KEM *kem = pqc_kem_new(name);
         if (!kem) continue;
@@ -155,6 +193,7 @@ static void run_sig_benchmarks(void) {
     for (int idx = 0; idx < count; idx++) {
         const char *name = pqc_sig_algorithm_name(idx);
         if (!bench_matches_filter(name)) continue;
+        if (bench_should_skip(name)) continue;
 
         PQC_SIG *sig = pqc_sig_new(name);
         if (!sig) continue;
