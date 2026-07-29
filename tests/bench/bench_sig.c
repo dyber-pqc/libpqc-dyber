@@ -86,22 +86,14 @@ static void bench_sig_keygen(const char *name, const PQC_SIG *sig,
     for (int w = 0; w < BENCH_WARMUP_ITERATIONS && w < iters; w++)
         pqc_sig_keygen(sig, pk, sk);
 
-    for (int i = 0; i < iters; i++) {
-        uint64_t c0 = bench_rdtsc();
-        double t0 = bench_timer_ms();
-
-        pqc_sig_keygen(sig, pk, sk);
-
-        double t1 = bench_timer_ms();
-        uint64_t c1 = bench_rdtsc();
-
-        samples[i] = t1 - t0;
-        cycles[i]  = c1 - c0;
-    }
+    /* Bounded by BENCH_SERIES's wall-clock budget as well as by iters;
+     * see the note in bench_common.h. */
+    int keygen_n = 0;
+    BENCH_SERIES(keygen_n, iters, samples, cycles, pqc_sig_keygen(sig, pk, sk));
 
     bench_result_t r;
-    bench_compute_stats(samples, iters, &r);
-    bench_compute_cycles_median(cycles, iters, &r);
+    bench_compute_stats(samples, keygen_n, &r);
+    bench_compute_cycles_median(cycles, keygen_n, &r);
     bench_emit_result(name, "keygen", &r,
                       pk_size, sk_size, "max_sig", max_sig_size, NULL, 0);
 
@@ -124,7 +116,6 @@ static void bench_sig_sign_verify(const char *name, const PQC_SIG *sig,
                                    const char *msg_label) {
     uint8_t *pk        = (uint8_t *)calloc(1, pk_size);
     uint8_t *sk        = (uint8_t *)calloc(1, sk_size);
-    uint8_t *sk_copy   = (uint8_t *)calloc(1, sk_size);
     uint8_t *signature = (uint8_t *)calloc(1, max_sig_size);
     size_t   sig_len   = 0;
 
@@ -133,7 +124,7 @@ static void bench_sig_sign_verify(const char *name, const PQC_SIG *sig,
     uint64_t *sign_cycles    = (uint64_t *)malloc((size_t)iters * sizeof(uint64_t));
     uint64_t *verify_cycles  = (uint64_t *)malloc((size_t)iters * sizeof(uint64_t));
 
-    if (!pk || !sk || !sk_copy || !signature ||
+    if (!pk || !sk || !signature ||
         !sign_samples || !verify_samples ||
         !sign_cycles || !verify_cycles) {
         goto done;
@@ -150,46 +141,27 @@ static void bench_sig_sign_verify(const char *name, const PQC_SIG *sig,
         }
     }
 
-    /* Sign benchmark */
-    for (int i = 0; i < iters; i++) {
-        if (is_stateful) {
-            /*
-             * For stateful schemes, we must use sign_stateful which
-             * advances the state. Re-generate keys periodically to
-             * avoid state exhaustion.
-             */
-            if (i % 100 == 0) {
-                pqc_sig_keygen(sig, pk, sk);
-            }
-            memcpy(sk_copy, sk, sk_size);
-
-            uint64_t c0 = bench_rdtsc();
-            double t0 = bench_timer_ms();
-
-            pqc_sig_sign_stateful(sig, signature, &sig_len,
-                                   message, msg_len, sk_copy);
-
-            double t1 = bench_timer_ms();
-            uint64_t c1 = bench_rdtsc();
-
-            sign_samples[i] = t1 - t0;
-            sign_cycles[i]  = c1 - c0;
-
-            /* Update sk for subsequent iterations */
-            memcpy(sk, sk_copy, sk_size);
-        } else {
-            uint64_t c0 = bench_rdtsc();
-            double t0 = bench_timer_ms();
-
-            pqc_sig_sign(sig, signature, &sig_len, message, msg_len, sk);
-
-            double t1 = bench_timer_ms();
-            uint64_t c1 = bench_rdtsc();
-
-            sign_samples[i] = t1 - t0;
-            sign_cycles[i]  = c1 - c0;
-        }
-    }
+    /*
+     * Sign benchmark.
+     *
+     * Stateful schemes advance their state on every signature, so the key
+     * is regenerated periodically to avoid exhausting it. That happens in
+     * the PRE hook, outside the timed region.
+     *
+     * This previously staged the key through sk_copy and copied it back
+     * afterwards, which is an identity round-trip -- sign_stateful advances
+     * whichever buffer it is handed, so signing sk directly has the same
+     * effect without timing two memcpys of the key.
+     */
+    int sign_n = 0, verify_n = 0;
+    BENCH_SERIES_PRE(sign_n, iters, sign_samples, sign_cycles,
+        (is_stateful && BENCH_SERIES_I % 100 == 0)
+            ? (void)pqc_sig_keygen(sig, pk, sk) : (void)0,
+        is_stateful
+            ? (void)pqc_sig_sign_stateful(sig, signature, &sig_len,
+                                          message, msg_len, sk)
+            : (void)pqc_sig_sign(sig, signature, &sig_len,
+                                 message, msg_len, sk));
 
     /* Generate a valid signature for verify benchmark */
     if (is_stateful) {
@@ -200,27 +172,17 @@ static void bench_sig_sign_verify(const char *name, const PQC_SIG *sig,
     }
 
     /* Verify benchmark */
-    for (int i = 0; i < iters; i++) {
-        uint64_t c0 = bench_rdtsc();
-        double t0 = bench_timer_ms();
-
-        pqc_sig_verify(sig, message, msg_len, signature, sig_len, pk);
-
-        double t1 = bench_timer_ms();
-        uint64_t c1 = bench_rdtsc();
-
-        verify_samples[i] = t1 - t0;
-        verify_cycles[i]  = c1 - c0;
-    }
+    BENCH_SERIES(verify_n, iters, verify_samples, verify_cycles,
+                 pqc_sig_verify(sig, message, msg_len, signature, sig_len, pk));
 
     /* Compute and emit results */
     bench_result_t r_sign, r_verify;
 
-    bench_compute_stats(sign_samples, iters, &r_sign);
-    bench_compute_cycles_median(sign_cycles, iters, &r_sign);
+    bench_compute_stats(sign_samples, sign_n, &r_sign);
+    bench_compute_cycles_median(sign_cycles, sign_n, &r_sign);
 
-    bench_compute_stats(verify_samples, iters, &r_verify);
-    bench_compute_cycles_median(verify_cycles, iters, &r_verify);
+    bench_compute_stats(verify_samples, verify_n, &r_verify);
+    bench_compute_cycles_median(verify_cycles, verify_n, &r_verify);
 
     char sign_op[64], verify_op[64];
     snprintf(sign_op, sizeof(sign_op), "sign(%s)", msg_label);
@@ -234,7 +196,6 @@ static void bench_sig_sign_verify(const char *name, const PQC_SIG *sig,
 done:
     free(pk);
     free(sk);
-    free(sk_copy);
     free(signature);
     free(sign_samples);
     free(verify_samples);

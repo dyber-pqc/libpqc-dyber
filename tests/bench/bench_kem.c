@@ -110,65 +110,39 @@ static void bench_kem_algorithm(const char *name) {
         pqc_kem_decaps(kem, ss2, ct, sk);
     }
 
+    /* Each series is bounded by BENCH_SERIES's wall-clock budget as well
+     * as by iters; see the note in bench_common.h. */
+    int keygen_n = 0, encaps_n = 0, decaps_n = 0;
+
     /* ---- Keygen benchmark ---- */
-    for (int i = 0; i < iters; i++) {
-        uint64_t c0 = bench_rdtsc();
-        double t0 = bench_timer_ms();
-
-        pqc_kem_keygen(kem, pk, sk);
-
-        double t1 = bench_timer_ms();
-        uint64_t c1 = bench_rdtsc();
-
-        keygen_samples[i] = t1 - t0;
-        keygen_cycles[i]  = c1 - c0;
-    }
+    BENCH_SERIES(keygen_n, iters, keygen_samples, keygen_cycles,
+                 pqc_kem_keygen(kem, pk, sk));
 
     /* We need a valid keypair for encaps/decaps */
     pqc_kem_keygen(kem, pk, sk);
 
     /* ---- Encaps benchmark ---- */
-    for (int i = 0; i < iters; i++) {
-        uint64_t c0 = bench_rdtsc();
-        double t0 = bench_timer_ms();
-
-        pqc_kem_encaps(kem, ct, ss, pk);
-
-        double t1 = bench_timer_ms();
-        uint64_t c1 = bench_rdtsc();
-
-        encaps_samples[i] = t1 - t0;
-        encaps_cycles[i]  = c1 - c0;
-    }
+    BENCH_SERIES(encaps_n, iters, encaps_samples, encaps_cycles,
+                 pqc_kem_encaps(kem, ct, ss, pk));
 
     /* ---- Decaps benchmark ---- */
     /* Generate a valid ciphertext for decaps */
     pqc_kem_encaps(kem, ct, ss, pk);
 
-    for (int i = 0; i < iters; i++) {
-        uint64_t c0 = bench_rdtsc();
-        double t0 = bench_timer_ms();
-
-        pqc_kem_decaps(kem, ss2, ct, sk);
-
-        double t1 = bench_timer_ms();
-        uint64_t c1 = bench_rdtsc();
-
-        decaps_samples[i] = t1 - t0;
-        decaps_cycles[i]  = c1 - c0;
-    }
+    BENCH_SERIES(decaps_n, iters, decaps_samples, decaps_cycles,
+                 pqc_kem_decaps(kem, ss2, ct, sk));
 
     /* Compute statistics */
     bench_result_t r_keygen, r_encaps, r_decaps;
 
-    bench_compute_stats(keygen_samples, iters, &r_keygen);
-    bench_compute_cycles_median(keygen_cycles, iters, &r_keygen);
+    bench_compute_stats(keygen_samples, keygen_n, &r_keygen);
+    bench_compute_cycles_median(keygen_cycles, keygen_n, &r_keygen);
 
-    bench_compute_stats(encaps_samples, iters, &r_encaps);
-    bench_compute_cycles_median(encaps_cycles, iters, &r_encaps);
+    bench_compute_stats(encaps_samples, encaps_n, &r_encaps);
+    bench_compute_cycles_median(encaps_cycles, encaps_n, &r_encaps);
 
-    bench_compute_stats(decaps_samples, iters, &r_decaps);
-    bench_compute_cycles_median(decaps_cycles, iters, &r_decaps);
+    bench_compute_stats(decaps_samples, decaps_n, &r_decaps);
+    bench_compute_cycles_median(decaps_cycles, decaps_n, &r_decaps);
 
     /* Emit results */
     bench_emit_result(name, "keygen", &r_keygen,
