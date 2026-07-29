@@ -29,7 +29,10 @@ jobs:
   benchmark:
     name: Bench (${{ matrix.os }}, ${{ matrix.compiler }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # Headroom above the measured runtime. The per-algorithm iteration
+    # scaling in bench_common.h is what keeps this bounded; this ceiling
+    # only catches a runaway.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

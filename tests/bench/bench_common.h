@@ -258,8 +258,24 @@ static int bench_is_slow_algorithm(const char *name) {
     if (strstr(name, "Frodo"))       return 1; /* slow */
     if (strstr(name, "XMSS"))        return 2; /* stateful, very slow keygen */
     if (strstr(name, "LMS"))         return 2; /* stateful */
-    if (strstr(name, "SLH-DSA") && strstr(name, "256"))  return 1;
-    if (strstr(name, "SPHINCS+") && strstr(name, "256")) return 1;
+
+    /*
+     * Hash-based signatures. Signing costs thousands of hash
+     * compressions, and the "small" (…s) variants trade signing speed for
+     * signature size -- they are roughly an order of magnitude slower to
+     * sign than the "fast" (…f) ones.
+     *
+     * Matching only names containing "256" (as this did previously) left
+     * 128s, 128f, 192s and 192f running at the full base iteration count.
+     * At 500 iterations across four message sizes that is thousands of
+     * signatures per parameter set, over twenty-four parameter sets, and
+     * the benchmark job exceeded its one-hour ceiling and was killed --
+     * which surfaced as a cancelled run rather than a reported failure.
+     */
+    if (strstr(name, "SLH-DSA") || strstr(name, "SPHINCS+")) {
+        size_t len = strlen(name);
+        return (len > 0 && name[len - 1] == 's') ? 2 : 1;
+    }
     return 0;
 }
 
