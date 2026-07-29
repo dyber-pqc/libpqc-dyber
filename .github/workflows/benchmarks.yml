@@ -29,6 +29,7 @@ jobs:
   benchmark:
     name: Bench (${{ matrix.os }}, ${{ matrix.compiler }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -159,6 +160,7 @@ jobs:
     name: Performance regression check
     needs: benchmark
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: github.event_name == 'pull_request'
 
     steps:
@@ -292,6 +294,7 @@ jobs:
     name: Store benchmark history
     needs: benchmark
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:

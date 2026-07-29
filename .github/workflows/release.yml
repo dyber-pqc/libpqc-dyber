@@ -12,6 +12,7 @@ jobs:
   build-artifacts:
     name: Build (${{ matrix.os }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -66,6 +67,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-artifacts
     steps:
       - uses: actions/checkout@v4
@@ -86,6 +88,7 @@ jobs:
   publish-python:
     name: Publish Python Package
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: create-release
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +116,7 @@ jobs:
   publish-rust:
     name: Publish Rust Crate
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: create-release
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +134,7 @@ jobs:
   publish-npm:
     name: Publish npm Package
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: create-release
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +155,7 @@ jobs:
   publish-nuget:
     name: Publish NuGet Package
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: create-release
     steps:
       - uses: actions/checkout@v4

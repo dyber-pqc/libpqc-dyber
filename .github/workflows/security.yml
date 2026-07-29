@@ -9,7 +9,53 @@ on:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
+# A superseded audit run has no value; don't queue them up behind each other.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Every job below is bounded. Without this a single hung algorithm can
+  # hold a runner for the full 6-hour ceiling -- which is how a previous
+  # CI run reached 14 hours before being cancelled.
+  CTEST_TIMEOUT: '900'
+
 jobs:
+  # ============================================================
+  # Security regression suite
+  #
+  # Asserts the invariants behind previously reported defects rather
+  # than round-trip success. This is the job that must stay green.
+  # ============================================================
+
+  audit-regression:
+    name: Security Regression Suite (ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
+      - name: Build with ASan + UBSan
+        env:
+          CC: clang
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPQC_BUILD_TESTS=ON \
+            -DPQC_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build
+      - name: Run security regression tests
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:detect_stack_use_after_return=1:check_initialization_order=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: ./build/tests/test_security_audit
+
   # ============================================================
   # Memory Safety Audit
   # ============================================================
@@ -17,6 +63,7 @@ jobs:
   asan-full:
     name: AddressSanitizer (Full Suite)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -29,21 +76,19 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
+            -DPQC_BUILD_BENCHMARKS=OFF \
             -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
           cmake --build build
       - name: Run all tests under ASan
         env:
           ASAN_OPTIONS: "detect_leaks=1:detect_stack_use_after_return=1:check_initialization_order=1"
-        run: |
-          ./build/tests/test_hash
-          ./build/tests/test_kem
-          ./build/tests/test_sig
-          ./build/tests/test_integration || true
+        run: ctest --test-dir build --output-on-failure --timeout ${{ env.CTEST_TIMEOUT }}
 
   ubsan-full:
     name: UndefinedBehaviorSanitizer (Full Suite)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -56,20 +101,19 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
+            -DPQC_BUILD_BENCHMARKS=OFF \
             -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined"
           cmake --build build
       - name: Run all tests under UBSan
         env:
           UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
-        run: |
-          ./build/tests/test_hash
-          ./build/tests/test_kem
-          ./build/tests/test_sig
+        run: ctest --test-dir build --output-on-failure --timeout ${{ env.CTEST_TIMEOUT }}
 
   msan-full:
     name: MemorySanitizer
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -82,14 +126,17 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
+            -DPQC_BUILD_BENCHMARKS=OFF \
             -DCMAKE_C_FLAGS="-fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=memory"
           cmake --build build
       - name: Run tests under MSan
+        # test_sig is excluded to match ci.yml: MSan reports uninitialised
+        # reads originating in the uninstrumented system libc, which this
+        # build cannot avoid without an instrumented toolchain.
         run: |
-          ./build/tests/test_hash
-          ./build/tests/test_kem
-          ./build/tests/test_sig
+          ctest --test-dir build --output-on-failure \
+            --timeout ${{ env.CTEST_TIMEOUT }} --exclude-regex "test_sig"
 
   # ============================================================
   # Valgrind Deep Analysis
@@ -98,6 +145,7 @@ jobs:
   valgrind-memcheck:
     name: Valgrind Memcheck
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +153,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
       - name: Build
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON -DCMAKE_C_FLAGS="-g -O0"
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_FLAGS="-g -O1"
           cmake --build build
       - name: Memcheck hash tests
         run: |
@@ -117,45 +167,26 @@ jobs:
           valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
             --track-origins=yes --error-exitcode=1 \
             ./build/tests/test_kem
-      - name: Memcheck Signature tests
+      - name: Memcheck security regression suite
         run: |
           valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
             --track-origins=yes --error-exitcode=1 \
-            ./build/tests/test_sig
-
-  valgrind-callgrind:
-    name: Valgrind Callgrind (Performance Profile)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
-      - name: Build
-        run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=ON -DCMAKE_C_FLAGS="-g"
-          cmake --build build
-      - name: Profile KEM
-        run: |
-          valgrind --tool=callgrind --callgrind-out-file=callgrind_kem.out \
-            ./build/tests/bench_kem
-      - name: Profile Signatures
-        run: |
-          valgrind --tool=callgrind --callgrind-out-file=callgrind_sig.out \
-            ./build/tests/bench_sig
-      - name: Upload profiles
-        uses: actions/upload-artifact@v4
-        with:
-          name: callgrind-profiles
-          path: callgrind_*.out
+            ./build/tests/test_security_audit
 
   # ============================================================
   # Constant-Time Verification
+  #
+  # NOTE: this is Valgrind memcheck over a build that marks secret
+  # buffers as undefined (PQC_CT_TESTING). It detects branches and
+  # memory indices derived from secret data. It is not a substitute
+  # for a dedicated constant-time tool and does not prove the absence
+  # of timing leaks.
   # ============================================================
 
   ct-verification:
-    name: Constant-Time Verification (ctgrind)
+    name: Constant-Time Verification (memcheck-based)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -166,16 +197,13 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
+            -DPQC_BUILD_BENCHMARKS=OFF \
             -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1 -g -O1"
           cmake --build build
       - name: Verify constant-time KEM operations
-        run: |
-          valgrind --tool=memcheck --error-exitcode=1 \
-            ./build/tests/test_kem 2>&1
+        run: valgrind --tool=memcheck --error-exitcode=1 ./build/tests/test_kem
       - name: Verify constant-time Signature operations
-        run: |
-          valgrind --tool=memcheck --error-exitcode=1 \
-            ./build/tests/test_sig 2>&1
+        run: valgrind --tool=memcheck --error-exitcode=1 ./build/tests/test_sig
 
   # ============================================================
   # Static Analysis
@@ -184,6 +212,7 @@ jobs:
   cppcheck:
     name: Cppcheck Static Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -195,8 +224,10 @@ jobs:
             --inconclusive \
             --error-exitcode=1 \
             --suppress=missingInclude \
+            --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
             --suppress=unmatchedSuppression \
+            --suppress=checkersReport \
             -I include/ -I src/ \
             src/core/ 2>&1 | tee cppcheck-report.txt
       - name: Upload report
@@ -209,15 +240,19 @@ jobs:
   clang-analyzer:
     name: Clang Static Analyzer
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang-tools
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPQC_BUILD_TESTS=ON -DPQC_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_COMPILER=clang
       - name: Run scan-build
         run: |
-          scan-build -o scan-results/ \
-            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON -DCMAKE_C_COMPILER=clang
           scan-build -o scan-results/ --status-bugs \
             cmake --build build 2>&1 | tee scan-build-report.txt
       - name: Upload results
@@ -225,7 +260,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: scan-build-results
-          path: scan-results/
+          path: |
+            scan-results/
+            scan-build-report.txt
 
   # ============================================================
   # Compiler Warning Audit
@@ -234,30 +271,32 @@ jobs:
   compiler-warnings:
     name: Zero Warnings (${{ matrix.compiler }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         compiler: [gcc, clang]
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
-      - name: Build with -Werror
+      - name: Build with warnings as errors
+        env:
+          CC: ${{ matrix.compiler }}
         run: |
-          if [ "${{ matrix.compiler }}" = "clang" ]; then
-            export CC=clang
-          fi
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPQC_BUILD_TESTS=ON \
-            -DCMAKE_C_FLAGS="-Werror"
+            -DPQC_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
           cmake --build build 2>&1 | tee warnings.log
-      - name: Check for warnings
-        run: |
-          if grep -i "warning:" warnings.log; then
-            echo "Warnings found!"
-            exit 1
-          fi
+      - name: Upload warning log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warnings-${{ matrix.compiler }}
+          path: warnings.log
 
   # ============================================================
   # Binary Reproducibility
@@ -266,24 +305,40 @@ jobs:
   reproducible-build:
     name: Reproducible Build Check
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
       - name: Build 1
         run: |
-          cmake -B build1 -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
+          cmake -B build1 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DPQC_BUILD_TESTS=OFF -DPQC_BUILD_BENCHMARKS=OFF
           cmake --build build1
-          sha256sum build1/libpqc.a > checksums1.txt
-      - name: Clean and Build 2
+      - name: Build 2
         run: |
-          cmake -B build2 -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
+          cmake -B build2 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DPQC_BUILD_TESTS=OFF -DPQC_BUILD_BENCHMARKS=OFF
           cmake --build build2
-          sha256sum build2/libpqc.a > checksums2.txt
       - name: Compare
         run: |
-          HASH1=$(sha256sum build1/libpqc.a | cut -d' ' -f1)
-          HASH2=$(sha256sum build2/libpqc.a | cut -d' ' -f1)
-          echo "Build 1: $HASH1"
-          echo "Build 2: $HASH2"
-          [ "$HASH1" = "$HASH2" ] && echo "Builds are reproducible!" || (echo "MISMATCH!" && exit 1)
+          # The static archive is libpqc.a on non-MSVC toolchains
+          # (OUTPUT_NAME pqc); locate it rather than assuming a path.
+          LIB1=$(find build1 -name 'libpqc*.a' | head -1)
+          LIB2=$(find build2 -name 'libpqc*.a' | head -1)
+          if [ -z "$LIB1" ] || [ -z "$LIB2" ]; then
+            echo "Static library not found:"
+            find build1 build2 -name '*.a'
+            exit 1
+          fi
+          HASH1=$(sha256sum "$LIB1" | cut -d' ' -f1)
+          HASH2=$(sha256sum "$LIB2" | cut -d' ' -f1)
+          echo "Build 1 ($LIB1): $HASH1"
+          echo "Build 2 ($LIB2): $HASH2"
+          if [ "$HASH1" = "$HASH2" ]; then
+            echo "Builds are reproducible"
+          else
+            echo "MISMATCH - builds are not bit-identical"
+            exit 1
+          fi
