@@ -279,6 +279,53 @@ static int bench_is_slow_algorithm(const char *name) {
     return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Wall-clock budget for a single measured series                               */
+/*                                                                             */
+/* The per-algorithm classification below is a heuristic on names, and it has   */
+/* twice failed to keep the benchmark job inside its CI ceiling -- first by     */
+/* matching only "256" among the hash-based signatures, then by not covering    */
+/* BIKE, whose decoder is O(r^2) with r up to 40973. A name-based rule cannot   */
+/* be trusted to bound runtime, and a new algorithm should not be able to hang  */
+/* CI by being added.                                                          */
+/*                                                                             */
+/* BENCH_SERIES therefore stops on whichever comes first: the requested         */
+/* iteration count, or this budget. It always completes at least one iteration  */
+/* so every algorithm still reports a measurement, and it reports how many      */
+/* iterations actually ran so the statistics describe the samples taken.        */
+/* -------------------------------------------------------------------------- */
+
+#define BENCH_MAX_MS_PER_SERIES  10000.0   /* 10 s per operation series */
+
+/*
+ * PRE runs before the timer starts on each iteration, for setup that must
+ * not be measured (re-keying a stateful scheme, for example). The current
+ * iteration index is available to it as BENCH_SERIES_I.
+ */
+#define BENCH_SERIES_I _bench_series_i
+
+#define BENCH_SERIES_PRE(n_out, iters, samples, cycles, PRE, OP)               \
+    do {                                                                        \
+        double _series_start = bench_timer_ms();                                \
+        int BENCH_SERIES_I = 0;                                                 \
+        while (BENCH_SERIES_I < (iters)) {                                      \
+            PRE;                                                                \
+            uint64_t _c0 = bench_rdtsc();                                       \
+            double _t0 = bench_timer_ms();                                      \
+            OP;                                                                 \
+            double _t1 = bench_timer_ms();                                      \
+            uint64_t _c1 = bench_rdtsc();                                       \
+            (samples)[BENCH_SERIES_I] = _t1 - _t0;                              \
+            (cycles)[BENCH_SERIES_I]  = _c1 - _c0;                              \
+            BENCH_SERIES_I++;                                                   \
+            if (_t1 - _series_start >= BENCH_MAX_MS_PER_SERIES) break;          \
+        }                                                                       \
+        (n_out) = BENCH_SERIES_I;                                               \
+    } while (0)
+
+#define BENCH_SERIES(n_out, iters, samples, cycles, OP)                        \
+    BENCH_SERIES_PRE(n_out, iters, samples, cycles, (void)0, OP)
+
 static int bench_adjusted_iterations(const char *name, int base) {
     int slow = bench_is_slow_algorithm(name);
     if (slow == 2) return (base < BENCH_VERY_SLOW_ITERATIONS) ? base : BENCH_VERY_SLOW_ITERATIONS;
