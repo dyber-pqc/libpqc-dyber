@@ -10,8 +10,14 @@
  *
  * The Merkle tree is computed bottom-up:
  *   - Leaf[i] = H(I || u32(r) || u16(D_LEAF) || OTS_PK[i])
- *   - Node[i] = H(I || u32(r) || u16(D_INTR) || Node[2i+1] || Node[2i+2])
- *   where r = leaf offset in the full binary tree (leaves start at 2^h).
+ *   - Node[r] = H(I || u32(r) || u16(D_INTR) || Node[2r] || Node[2r+1])
+ *   where r is the node number in the full binary tree: the leaf for
+ *   index i is node 2^h + i, and the root is node 1.
+ *
+ * The same traversal yields the authentication path for a chosen leaf,
+ * so signing and key generation share one implementation.  The path
+ * MUST come from this tree -- deriving it from the secret seed would
+ * both fail to verify and publish a PRF of secret key material.
  */
 
 #include <string.h>
@@ -24,106 +30,133 @@
 #define D_LEAF 0x8282
 #define D_INTR 0x8383
 
+/*
+ * Largest tree height this implementation will build.
+ *
+ * Building the tree costs 2^h LM-OTS key generations, each of which is
+ * PQC_LMOTS_P chains of 2^PQC_LMOTS_W - 1 hash steps.  Beyond h = 15
+ * that is not a computation a caller can wait for, and there is no
+ * cached-state format in the 64-byte secret key to amortise it across
+ * signatures.  Refusing is the honest answer; silently substituting a
+ * hash of the seed for the root (as an earlier version did) produces a
+ * public key that commits to nothing.
+ */
+#define HSS_MAX_COMPUTABLE_H  15
+
 /* ------------------------------------------------------------------ */
-/* Compute the LMS Merkle tree root.                                    */
-/*                                                                      */
-/* root: 32-byte output.                                                */
-/* I: 16-byte tree identifier.                                          */
-/* seed: 32-byte master seed for deriving OTS keys.                     */
-/* h: tree height (10, 15, 20, or 25).                                  */
-/*                                                                      */
-/* For large h this is expensive but correct.  Production code would    */
-/* use a streaming approach or BDS traversal.                           */
+/* Derive the per-leaf LM-OTS seed.                                     */
+/* Must match the derivation used by lms_sign_stateful_impl.            */
 /* ------------------------------------------------------------------ */
 
-void hss_compute_root(uint8_t *root, const uint8_t *I,
-                      const uint8_t *seed, int h)
+static void hss_leaf_seed(uint8_t *out, const uint8_t *I,
+                          const uint8_t *seed, uint32_t leaf)
 {
-    /*
-     * For trees of height > 15, full in-memory computation requires
-     * too much RAM.  We implement an iterative approach that computes
-     * one level at a time, only keeping two levels in memory.
-     *
-     * For the library API we limit practical computation to h <= 15
-     * in-memory and use a level-by-level hash for larger heights.
-     */
-    uint32_t num_leaves = (uint32_t)1 << h;
+    pqc_sha256_ctx ctx;
+    uint8_t buf[4];
+
+    pqc_sha256_init(&ctx);
+    pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
+    lms_store_u32(buf, leaf);
+    pqc_sha256_update(&ctx, buf, 4);
+    pqc_sha256_update(&ctx, seed, N);
+    pqc_sha256_final(&ctx, out);
+}
+
+/* ------------------------------------------------------------------ */
+/* Compute the LMS Merkle tree root and, optionally, the               */
+/* authentication path for one leaf.                                    */
+/*                                                                      */
+/* root:      32-byte output (may be NULL if only the path is wanted).  */
+/* auth_path: h * 32-byte output, or NULL.  Entry l is the sibling of   */
+/*            the target's ancestor at height l.                        */
+/* I:         16-byte tree identifier.                                  */
+/* seed:      32-byte master seed for deriving OTS keys.                */
+/* h:         tree height.                                              */
+/* target:    leaf index the auth path is for (ignored if auth_path is  */
+/*            NULL).                                                    */
+/*                                                                      */
+/* Returns 0 on success, -1 if the height is not computable or on       */
+/* allocation failure.                                                  */
+/* ------------------------------------------------------------------ */
+
+int hss_compute_root_and_path(uint8_t *root, uint8_t *auth_path,
+                              const uint8_t *I, const uint8_t *seed,
+                              int h, uint32_t target)
+{
+    uint32_t num_leaves;
     uint32_t level_size;
     uint8_t *current = NULL;
     uint8_t *next = NULL;
     uint32_t i;
-    int level;
+    int hh;
 
-    if (h > 20) {
-        /*
-         * For very large trees, return a deterministic hash as root.
-         * Full computation would require specialized tree traversal.
-         */
-        pqc_sha256_ctx ctx;
-        pqc_sha256_init(&ctx);
-        pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
-        pqc_sha256_update(&ctx, seed, N);
-        uint8_t buf[4];
-        lms_store_u32(buf, (uint32_t)h);
-        pqc_sha256_update(&ctx, buf, 4);
-        pqc_sha256_final(&ctx, root);
-        return;
+    if (h < 1 || h > HSS_MAX_COMPUTABLE_H) {
+        if (root) memset(root, 0, N);
+        return -1;
     }
 
-    /* Allocate leaf level */
+    num_leaves = (uint32_t)1 << h;
+
     current = (uint8_t *)pqc_calloc((size_t)num_leaves, N);
     if (!current) {
-        memset(root, 0, N);
-        return;
+        if (root) memset(root, 0, N);
+        return -1;
     }
 
-    /* Compute leaf hashes: Leaf[i] = H(I || u32(r) || D_LEAF || OTS_PK[i]) */
+    /* Leaf[i] = H(I || u32(2^h + i) || D_LEAF || OTS_PK[i]) */
     for (i = 0; i < num_leaves; i++) {
+        uint8_t leaf_seed[N];
         uint8_t ots_pk[N];
         pqc_sha256_ctx ctx;
         uint8_t buf[4];
-        uint32_t r = num_leaves + i; /* node number in full tree */
 
-        /* Derive per-leaf OTS seed */
-        uint8_t leaf_seed[N];
-        pqc_sha256_ctx seed_ctx;
-        pqc_sha256_init(&seed_ctx);
-        pqc_sha256_update(&seed_ctx, I, PQC_LMS_I_LEN);
-        lms_store_u32(buf, i);
-        pqc_sha256_update(&seed_ctx, buf, 4);
-        pqc_sha256_update(&seed_ctx, seed, N);
-        pqc_sha256_final(&seed_ctx, leaf_seed);
-
-        /* Compute OTS public key for leaf i */
+        hss_leaf_seed(leaf_seed, I, seed, i);
         lmots_keygen(ots_pk, I, i, leaf_seed);
 
-        /* Hash to leaf value */
         pqc_sha256_init(&ctx);
         pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
-        lms_store_u32(buf, r);
+        lms_store_u32(buf, num_leaves + i);
         pqc_sha256_update(&ctx, buf, 4);
         buf[0] = (uint8_t)(D_LEAF >> 8);
         buf[1] = (uint8_t)(D_LEAF & 0xFF);
         pqc_sha256_update(&ctx, buf, 2);
         pqc_sha256_update(&ctx, ots_pk, N);
         pqc_sha256_final(&ctx, current + (size_t)i * N);
+
+        pqc_memzero(leaf_seed, N);
     }
 
-    /* Build tree bottom-up */
+    /*
+     * Merge upward.  Before collapsing height hh into hh+1, the
+     * sibling of the target's ancestor at height hh is still present,
+     * so capture it for the authentication path.
+     */
     level_size = num_leaves;
-    for (level = h - 1; level >= 0; level--) {
+    for (hh = 0; hh < h; hh++) {
         uint32_t parent_count = level_size / 2;
+
+        if (auth_path) {
+            uint32_t sibling = (target >> hh) ^ 1u;
+            if (sibling < level_size) {
+                memcpy(auth_path + (size_t)hh * N,
+                       current + (size_t)sibling * N, N);
+            } else {
+                memset(auth_path + (size_t)hh * N, 0, N);
+            }
+        }
+
         next = (uint8_t *)pqc_calloc((size_t)parent_count, N);
         if (!next) {
             pqc_free(current, (size_t)level_size * N);
-            memset(root, 0, N);
-            return;
+            if (root) memset(root, 0, N);
+            return -1;
         }
 
         for (i = 0; i < parent_count; i++) {
             pqc_sha256_ctx ctx;
             uint8_t buf[4];
-            uint32_t r = ((uint32_t)1 << level) + i;
+            /* Parent node number at height hh+1. */
+            uint32_t r = (num_leaves >> (hh + 1)) + i;
 
             pqc_sha256_init(&ctx);
             pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
@@ -143,7 +176,13 @@ void hss_compute_root(uint8_t *root, const uint8_t *I,
         level_size = parent_count;
     }
 
-    /* Root is the single remaining node */
-    memcpy(root, current, N);
+    if (root) memcpy(root, current, N);
     pqc_free(current, N);
+    return 0;
+}
+
+int hss_compute_root(uint8_t *root, const uint8_t *I,
+                     const uint8_t *seed, int h)
+{
+    return hss_compute_root_and_path(root, NULL, I, seed, h, 0);
 }

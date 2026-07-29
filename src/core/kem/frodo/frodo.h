@@ -87,10 +87,10 @@ void frodo_decode(uint8_t *msg, const uint16_t *in,
 /* Core KEM operations                                                  */
 /* ------------------------------------------------------------------ */
 
-void frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
+int  frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
                            const frodo_params_t *params,
                            const uint16_t *cdf, uint32_t cdf_len);
-void frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
+int  frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
                            const uint8_t *pk,
                            const frodo_params_t *params,
                            const uint16_t *cdf, uint32_t cdf_len);

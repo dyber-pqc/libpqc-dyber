@@ -255,7 +255,10 @@ fndsa_solve_ntru(unsigned logn,
     for (lv = logn; lv > 0; lv--) {
         size_t cn = (size_t)1 << lv;
         size_t chn = cn >> 1;
-        int64_t *tmp64;
+        /* Accumulate in unsigned: the field-norm products routinely exceed
+         * int64_t range, and signed overflow is undefined behaviour even
+         * where the generated code happens to wrap as intended. */
+        uint64_t *tmp64;
 
         fi32[lv - 1] = (int32_t *)malloc(chn * sizeof(int32_t));
         gi32[lv - 1] = (int32_t *)malloc(chn * sizeof(int32_t));
@@ -265,13 +268,13 @@ fndsa_solve_ntru(unsigned logn,
             { rc = -1; goto done; }
 
         /* int32_t field norms (truncated -- Babai tolerates this). */
-        tmp64 = (int64_t *)calloc(chn, sizeof(int64_t));
+        tmp64 = (uint64_t *)calloc(chn, sizeof(uint64_t));
         if (!tmp64) { rc = -1; goto done; }
         for (i = 0; i < chn; i++) {
             size_t j;
             for (j = 0; j < chn; j++) {
                 size_t idx = i + j;
-                int64_t p = (int64_t)fi32[lv][2 * i] * (int64_t)fi32[lv][2 * j];
+                uint64_t p = (uint64_t)(int64_t)fi32[lv][2 * i] * (uint64_t)(int64_t)fi32[lv][2 * j];
                 if (idx >= chn) { idx -= chn; tmp64[idx] -= p; }
                 else { tmp64[idx] += p; }
             }
@@ -280,21 +283,21 @@ fndsa_solve_ntru(unsigned logn,
             size_t j;
             for (j = 0; j < chn; j++) {
                 size_t idx = i + j + 1;
-                int64_t p = (int64_t)fi32[lv][2 * i + 1] * (int64_t)fi32[lv][2 * j + 1];
+                uint64_t p = (uint64_t)(int64_t)fi32[lv][2 * i + 1] * (uint64_t)(int64_t)fi32[lv][2 * j + 1];
                 if (idx >= chn) { idx -= chn; tmp64[idx] += p; }
                 else { tmp64[idx] -= p; }
             }
         }
-        for (i = 0; i < chn; i++) fi32[lv - 1][i] = (int32_t)tmp64[i];
+        for (i = 0; i < chn; i++) fi32[lv - 1][i] = (int32_t)(uint32_t)tmp64[i];
         free(tmp64);
 
-        tmp64 = (int64_t *)calloc(chn, sizeof(int64_t));
+        tmp64 = (uint64_t *)calloc(chn, sizeof(uint64_t));
         if (!tmp64) { rc = -1; goto done; }
         for (i = 0; i < chn; i++) {
             size_t j;
             for (j = 0; j < chn; j++) {
                 size_t idx = i + j;
-                int64_t p = (int64_t)gi32[lv][2 * i] * (int64_t)gi32[lv][2 * j];
+                uint64_t p = (uint64_t)(int64_t)gi32[lv][2 * i] * (uint64_t)(int64_t)gi32[lv][2 * j];
                 if (idx >= chn) { idx -= chn; tmp64[idx] -= p; }
                 else { tmp64[idx] += p; }
             }
@@ -303,12 +306,12 @@ fndsa_solve_ntru(unsigned logn,
             size_t j;
             for (j = 0; j < chn; j++) {
                 size_t idx = i + j + 1;
-                int64_t p = (int64_t)gi32[lv][2 * i + 1] * (int64_t)gi32[lv][2 * j + 1];
+                uint64_t p = (uint64_t)(int64_t)gi32[lv][2 * i + 1] * (uint64_t)(int64_t)gi32[lv][2 * j + 1];
                 if (idx >= chn) { idx -= chn; tmp64[idx] += p; }
                 else { tmp64[idx] -= p; }
             }
         }
-        for (i = 0; i < chn; i++) gi32[lv - 1][i] = (int32_t)tmp64[i];
+        for (i = 0; i < chn; i++) gi32[lv - 1][i] = (int32_t)(uint32_t)tmp64[i];
         free(tmp64);
 
         /* Modular field norms (exact mod P). */

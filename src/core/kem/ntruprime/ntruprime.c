@@ -45,31 +45,31 @@
 static const sntrup_params_t params_761 = {
     .p = 761, .q = 4591, .w = 286,
     .round_bytes = 1007, .small_bytes = 153,
-    .pk_bytes = 1522, .sk_bytes = 1892, .ct_bytes = 1554, .ss_bytes = 32
+    .pk_bytes = SNTRUP761_PK_BYTES, .sk_bytes = SNTRUP761_SK_BYTES, .ct_bytes = SNTRUP761_CT_BYTES, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_857 = {
     .p = 857, .q = 5167, .w = 322,
     .round_bytes = 1152, .small_bytes = 172,
-    .pk_bytes = 1714, .sk_bytes = 2122, .ct_bytes = 1746, .ss_bytes = 32
+    .pk_bytes = SNTRUP857_PK_BYTES, .sk_bytes = SNTRUP857_SK_BYTES, .ct_bytes = SNTRUP857_CT_BYTES, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_953 = {
     .p = 953, .q = 6343, .w = 396,
     .round_bytes = 1317, .small_bytes = 191,
-    .pk_bytes = 1906, .sk_bytes = 2352, .ct_bytes = 1938, .ss_bytes = 32
+    .pk_bytes = SNTRUP953_PK_BYTES, .sk_bytes = SNTRUP953_SK_BYTES, .ct_bytes = SNTRUP953_CT_BYTES, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_1013 = {
     .p = 1013, .q = 7177, .w = 448,
     .round_bytes = 1423, .small_bytes = 203,
-    .pk_bytes = 2026, .sk_bytes = 2496, .ct_bytes = 2058, .ss_bytes = 32
+    .pk_bytes = SNTRUP1013_PK_BYTES, .sk_bytes = SNTRUP1013_SK_BYTES, .ct_bytes = SNTRUP1013_CT_BYTES, .ss_bytes = 32
 };
 
 static const sntrup_params_t params_1277 = {
     .p = 1277, .q = 7879, .w = 492,
     .round_bytes = 1815, .small_bytes = 256,
-    .pk_bytes = 2554, .sk_bytes = 3130, .ct_bytes = 2586, .ss_bytes = 32
+    .pk_bytes = SNTRUP1277_PK_BYTES, .sk_bytes = SNTRUP1277_SK_BYTES, .ct_bytes = SNTRUP1277_CT_BYTES, .ss_bytes = 32
 };
 
 /* ------------------------------------------------------------------ */
@@ -378,33 +378,35 @@ static pqc_status_t sntrup_decaps_impl(uint8_t *ss, const uint8_t *ct,
     /* r = e * ginv in R3 */
     r3_mul(&r_dec, &e, &ginv, p->p);
 
-    /* Check weight of r */
+    /*
+     * Evaluate every check unconditionally and without early exit.
+     * Branching here would leak, through timing, the same bit that
+     * implicit rejection exists to hide.
+     */
     int w = small_weight(&r_dec, p->p);
-    int valid = (w == 2 * p->w) ? 1 : 0;
+    int weight_ok = (w == 2 * p->w);
 
     /* Re-encapsulate to verify */
-    if (valid) {
-        sntrup_decode_rq(&h, pk_in_sk, p);
-        rq_mul_small(&hr_check, &h, &r_dec, p);
-        rq_round(&c_check, &hr_check, p);
+    sntrup_decode_rq(&h, pk_in_sk, p);
+    rq_mul_small(&hr_check, &h, &r_dec, p);
+    rq_round(&c_check, &hr_check, p);
 
-        /* Compare c and c_check */
-        for (int i = 0; i < p->p; i++) {
-            if (c.coeffs[i] != c_check.coeffs[i]) {
-                valid = 0;
-                break;
-            }
-        }
+    /* Compare c and c_check */
+    uint32_t cdiff = 0;
+    for (int i = 0; i < p->p; i++) {
+        cdiff |= (uint32_t)(c.coeffs[i] ^ c_check.coeffs[i]);
     }
 
     /* Also check confirmation hash */
-    if (valid) {
+    int hash_ok;
+    {
         uint8_t r_hash[32];
         hash_small(r_hash, &r_dec, p->p);
-        if (pqc_memcmp_ct(ct + rq_bytes, r_hash, 32) != 0) {
-            valid = 0;
-        }
+        hash_ok = (pqc_memcmp_ct(ct + rq_bytes, r_hash, 32) == 0);
+        pqc_memzero(r_hash, sizeof(r_hash));
     }
+
+    int valid = weight_ok && (cdiff == 0) && hash_ok;
 
     /*
      * Compute shared secret:
@@ -485,9 +487,9 @@ static const pqc_kem_vtable_t sntrup761_vtable = {
     .algorithm_name    = PQC_KEM_NTRUPRIME_SNTRUP761,
     .security_level    = PQC_SECURITY_LEVEL_1,
     .nist_standard     = "NTRU Prime",
-    .public_key_size   = 1158,
-    .secret_key_size   = 1763,
-    .ciphertext_size   = 1039,
+    .public_key_size   = SNTRUP761_PK_BYTES,
+    .secret_key_size   = SNTRUP761_SK_BYTES,
+    .ciphertext_size   = SNTRUP761_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = sntrup761_keygen,
     .encaps = sntrup761_encaps,
@@ -498,9 +500,9 @@ static const pqc_kem_vtable_t sntrup857_vtable = {
     .algorithm_name    = PQC_KEM_NTRUPRIME_SNTRUP857,
     .security_level    = PQC_SECURITY_LEVEL_3,
     .nist_standard     = "NTRU Prime",
-    .public_key_size   = 1322,
-    .secret_key_size   = 1999,
-    .ciphertext_size   = 1184,
+    .public_key_size   = SNTRUP857_PK_BYTES,
+    .secret_key_size   = SNTRUP857_SK_BYTES,
+    .ciphertext_size   = SNTRUP857_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = sntrup857_keygen,
     .encaps = sntrup857_encaps,
@@ -511,9 +513,9 @@ static const pqc_kem_vtable_t sntrup953_vtable = {
     .algorithm_name    = PQC_KEM_NTRUPRIME_SNTRUP953,
     .security_level    = PQC_SECURITY_LEVEL_3,
     .nist_standard     = "NTRU Prime",
-    .public_key_size   = 1505,
-    .secret_key_size   = 2254,
-    .ciphertext_size   = 1349,
+    .public_key_size   = SNTRUP953_PK_BYTES,
+    .secret_key_size   = SNTRUP953_SK_BYTES,
+    .ciphertext_size   = SNTRUP953_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = sntrup953_keygen,
     .encaps = sntrup953_encaps,
@@ -524,9 +526,9 @@ static const pqc_kem_vtable_t sntrup1013_vtable = {
     .algorithm_name    = PQC_KEM_NTRUPRIME_SNTRUP1013,
     .security_level    = PQC_SECURITY_LEVEL_5,
     .nist_standard     = "NTRU Prime",
-    .public_key_size   = 1623,
-    .secret_key_size   = 2417,
-    .ciphertext_size   = 1455,
+    .public_key_size   = SNTRUP1013_PK_BYTES,
+    .secret_key_size   = SNTRUP1013_SK_BYTES,
+    .ciphertext_size   = SNTRUP1013_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = sntrup1013_keygen,
     .encaps = sntrup1013_encaps,
@@ -537,9 +539,9 @@ static const pqc_kem_vtable_t sntrup1277_vtable = {
     .algorithm_name    = PQC_KEM_NTRUPRIME_SNTRUP1277,
     .security_level    = PQC_SECURITY_LEVEL_5,
     .nist_standard     = "NTRU Prime",
-    .public_key_size   = 2067,
-    .secret_key_size   = 3059,
-    .ciphertext_size   = 1847,
+    .public_key_size   = SNTRUP1277_PK_BYTES,
+    .secret_key_size   = SNTRUP1277_SK_BYTES,
+    .ciphertext_size   = SNTRUP1277_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = sntrup1277_keygen,
     .encaps = sntrup1277_encaps,

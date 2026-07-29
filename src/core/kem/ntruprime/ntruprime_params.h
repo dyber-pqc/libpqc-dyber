@@ -19,6 +19,28 @@
 #ifndef PQC_NTRUPRIME_PARAMS_H
 #define PQC_NTRUPRIME_PARAMS_H
 
+/*
+ * Serialised sizes.
+ *
+ * These MUST be derived from the layout the encoders actually emit, not
+ * from the Streamlined NTRU Prime specification: sntrup_encode_rq here
+ * writes two whole bytes per coefficient rather than the spec's packed
+ * base-q encoding, and the secret key additionally stores g^-1.
+ * Constants copied from the spec are smaller than what keygen writes,
+ * which is a heap buffer overflow in every call.
+ *
+ *   pk_bytes = 2 * p                       (sntrup_encode_rq)
+ *   ct_bytes = 2 * p + 32                  (encoded c + confirmation hash)
+ *   sk_bytes = 2 * ceil(p / 5)             (encoded f and ginv)
+ *            + pk_bytes + 64               (embedded pk, rho, pk hash)
+ */
+#define SNTRUP_RQ_BYTES(p)       ((p) * 2)
+#define SNTRUP_SMALL_BYTES(p)    (((p) + 4) / 5)
+#define SNTRUP_PK_BYTES_FOR(p)   SNTRUP_RQ_BYTES(p)
+#define SNTRUP_CT_BYTES_FOR(p)   (SNTRUP_RQ_BYTES(p) + 32)
+#define SNTRUP_SK_BYTES_FOR(p) \
+    (2 * SNTRUP_SMALL_BYTES(p) + SNTRUP_RQ_BYTES(p) + 64)
+
 /* ------------------------------------------------------------------ */
 /* sntrup761                                                           */
 /* ------------------------------------------------------------------ */
@@ -26,11 +48,11 @@
 #define SNTRUP761_Q             4591
 #define SNTRUP761_W             286
 #define SNTRUP761_ROUND_BYTES   1007   /* encoding of Rounded(q) coeffs */
-#define SNTRUP761_SMALL_BYTES   191    /* encoding of small coeffs */
+#define SNTRUP761_SMALL_BYTES   SNTRUP_SMALL_BYTES(SNTRUP761_P)    /* encoding of small coeffs */
 
-#define SNTRUP761_PK_BYTES      1158
-#define SNTRUP761_SK_BYTES      1763
-#define SNTRUP761_CT_BYTES      1039
+#define SNTRUP761_PK_BYTES      SNTRUP_PK_BYTES_FOR(SNTRUP761_P)
+#define SNTRUP761_SK_BYTES      SNTRUP_SK_BYTES_FOR(SNTRUP761_P)
+#define SNTRUP761_CT_BYTES      SNTRUP_CT_BYTES_FOR(SNTRUP761_P)
 #define SNTRUP761_SS_BYTES      32
 
 /* ------------------------------------------------------------------ */
@@ -40,11 +62,11 @@
 #define SNTRUP857_Q             5167
 #define SNTRUP857_W             322
 #define SNTRUP857_ROUND_BYTES   1152
-#define SNTRUP857_SMALL_BYTES   215
+#define SNTRUP857_SMALL_BYTES   SNTRUP_SMALL_BYTES(SNTRUP857_P)
 
-#define SNTRUP857_PK_BYTES      1322
-#define SNTRUP857_SK_BYTES      1999
-#define SNTRUP857_CT_BYTES      1184
+#define SNTRUP857_PK_BYTES      SNTRUP_PK_BYTES_FOR(SNTRUP857_P)
+#define SNTRUP857_SK_BYTES      SNTRUP_SK_BYTES_FOR(SNTRUP857_P)
+#define SNTRUP857_CT_BYTES      SNTRUP_CT_BYTES_FOR(SNTRUP857_P)
 #define SNTRUP857_SS_BYTES      32
 
 /* ------------------------------------------------------------------ */
@@ -54,11 +76,11 @@
 #define SNTRUP953_Q             6343
 #define SNTRUP953_W             396
 #define SNTRUP953_ROUND_BYTES   1317
-#define SNTRUP953_SMALL_BYTES   239
+#define SNTRUP953_SMALL_BYTES   SNTRUP_SMALL_BYTES(SNTRUP953_P)
 
-#define SNTRUP953_PK_BYTES      1505
-#define SNTRUP953_SK_BYTES      2254
-#define SNTRUP953_CT_BYTES      1349
+#define SNTRUP953_PK_BYTES      SNTRUP_PK_BYTES_FOR(SNTRUP953_P)
+#define SNTRUP953_SK_BYTES      SNTRUP_SK_BYTES_FOR(SNTRUP953_P)
+#define SNTRUP953_CT_BYTES      SNTRUP_CT_BYTES_FOR(SNTRUP953_P)
 #define SNTRUP953_SS_BYTES      32
 
 /* ------------------------------------------------------------------ */
@@ -68,11 +90,11 @@
 #define SNTRUP1013_Q            7177
 #define SNTRUP1013_W            448
 #define SNTRUP1013_ROUND_BYTES  1423
-#define SNTRUP1013_SMALL_BYTES  254
+#define SNTRUP1013_SMALL_BYTES   SNTRUP_SMALL_BYTES(SNTRUP1013_P)
 
-#define SNTRUP1013_PK_BYTES     1623
-#define SNTRUP1013_SK_BYTES     2417
-#define SNTRUP1013_CT_BYTES     1455
+#define SNTRUP1013_PK_BYTES      SNTRUP_PK_BYTES_FOR(SNTRUP1013_P)
+#define SNTRUP1013_SK_BYTES      SNTRUP_SK_BYTES_FOR(SNTRUP1013_P)
+#define SNTRUP1013_CT_BYTES      SNTRUP_CT_BYTES_FOR(SNTRUP1013_P)
 #define SNTRUP1013_SS_BYTES     32
 
 /* ------------------------------------------------------------------ */
@@ -82,11 +104,11 @@
 #define SNTRUP1277_Q            7879
 #define SNTRUP1277_W            492
 #define SNTRUP1277_ROUND_BYTES  1815
-#define SNTRUP1277_SMALL_BYTES  320
+#define SNTRUP1277_SMALL_BYTES   SNTRUP_SMALL_BYTES(SNTRUP1277_P)
 
-#define SNTRUP1277_PK_BYTES     2067
-#define SNTRUP1277_SK_BYTES     3059
-#define SNTRUP1277_CT_BYTES     1847
+#define SNTRUP1277_PK_BYTES      SNTRUP_PK_BYTES_FOR(SNTRUP1277_P)
+#define SNTRUP1277_SK_BYTES      SNTRUP_SK_BYTES_FOR(SNTRUP1277_P)
+#define SNTRUP1277_CT_BYTES      SNTRUP_CT_BYTES_FOR(SNTRUP1277_P)
 #define SNTRUP1277_SS_BYTES     32
 
 /* ------------------------------------------------------------------ */

@@ -54,10 +54,14 @@ static void xmss_hash_f(uint8_t *out, const uint8_t *in,
     uint8_t key[N];
     uint8_t bitmask[N];
 
-    /* Generate key and bitmask from pub_seed and ADRS */
-    xmss_addr_set_hash(addr, 0);
+    /*
+     * Generate key and bitmask from pub_seed and ADRS.
+     * The keyAndMask selector is word 7 (offset 28), which is distinct
+     * from the chain position at offset 24 that the caller has set.
+     */
+    xmss_addr_set_key_and_mask(addr, 0);
     xmss_prf(key, pub_seed, addr);
-    xmss_addr_set_hash(addr, 1);
+    xmss_addr_set_key_and_mask(addr, 1);
     xmss_prf(bitmask, pub_seed, addr);
 
     /* H(key || (in XOR bitmask)) */
@@ -112,10 +116,19 @@ static void wots_base_w(int *basew, const uint8_t *msg_hash)
         csum += (uint32_t)(W - 1 - basew[i]);
     }
 
-    /* Checksum in base w (len2 = 3) */
+    /*
+     * Checksum in base w (len2 = 3), RFC 8391 Algorithm 5.
+     *
+     * csum is left-shifted by (8 - ((len2 * lg(w)) % 8)) = 4 bits for
+     * byte alignment, then serialised as len2_bytes = 2 bytes and read
+     * back as the top len2 nibbles.  For a 2-byte value those nibbles
+     * sit at shifts 12, 8 and 4 -- extracting at 8, 4, 0 instead would
+     * discard the most significant checksum nibble and force the final
+     * chain to a constant zero.
+     */
     csum <<= 4; /* left-shift for alignment */
     for (i = 0; i < LEN2; i++) {
-        basew[LEN1 + i] = (int)((csum >> (4 * (LEN2 - 1 - i))) & 0x0F);
+        basew[LEN1 + i] = (int)((csum >> (4 * (LEN2 - i))) & 0x0F);
     }
 }
 
@@ -130,7 +143,13 @@ void xmss_wots_keygen(uint8_t *pk, const uint8_t *seed,
     int i;
     uint8_t sk_chain[N];
 
-    xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_OTS);
+    /*
+     * The caller has already set the type to OTS *and* the leaf index
+     * (offset 16).  Re-setting the type here would memset offsets
+     * 16..31 and wipe that index, so every leaf in the tree would
+     * derive an identical WOTS+ key -- destroying the one-time
+     * property that XMSS depends on.
+     */
 
     for (i = 0; i < LEN; i++) {
         xmss_addr_set_chain(addr, (uint32_t)i);
@@ -160,7 +179,7 @@ void xmss_wots_sign(uint8_t *sig, const uint8_t *msg,
 
     wots_base_w(basew, msg);
 
-    xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_OTS);
+    /* Type and leaf index are set by the caller; see xmss_wots_keygen. */
 
     for (i = 0; i < LEN; i++) {
         xmss_addr_set_chain(addr, (uint32_t)i);
@@ -186,7 +205,7 @@ void xmss_wots_pk_from_sig(uint8_t *pk, const uint8_t *sig,
 
     wots_base_w(basew, msg);
 
-    xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_OTS);
+    /* Type and leaf index are set by the caller; see xmss_wots_keygen. */
 
     for (i = 0; i < LEN; i++) {
         xmss_addr_set_chain(addr, (uint32_t)i);

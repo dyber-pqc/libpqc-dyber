@@ -63,7 +63,7 @@ static void frodo_gen_a(uint16_t *A, uint32_t n, const uint8_t *seed,
 /* sk = (s || pk || S^T || pkh)                                        */
 /* ------------------------------------------------------------------ */
 
-void frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
+int frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
                            const frodo_params_t *params,
                            const uint16_t *cdf, uint32_t cdf_len)
 {
@@ -86,7 +86,7 @@ void frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
 
     if (!A || !S || !E || !B || !S_T) {
         free(A); free(S); free(E); free(B); free(S_T);
-        return;
+        return -1;
     }
 
     /* Generate random seedA and seedSE */
@@ -94,9 +94,20 @@ void frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
     uint8_t s_val[FRODO_MAX_LEN_S]; /* random s for implicit rejection */
     uint8_t seedSE[FRODO_MAX_LEN_K]; /* will be expanded */
 
-    pqc_randombytes(seedA, FRODO_SEED_A_BYTES);
-    pqc_randombytes(s_val, params->len_s);
-    pqc_randombytes(seedSE, params->len_seedse);
+    /*
+     * A caller-supplied RNG that fails leaves these buffers untouched,
+     * so the key would be derived from whatever was already on the
+     * stack.  Refuse instead.
+     */
+    if (pqc_randombytes(seedA, FRODO_SEED_A_BYTES) != PQC_OK ||
+        pqc_randombytes(s_val, params->len_s) != PQC_OK ||
+        pqc_randombytes(seedSE, params->len_seedse) != PQC_OK) {
+        pqc_memzero(seedA, sizeof(seedA));
+        pqc_memzero(s_val, sizeof(s_val));
+        pqc_memzero(seedSE, sizeof(seedSE));
+        free(A); free(S); free(E); free(B); free(S_T);
+        return -1;
+    }
 
     /* Expand seedSE for S and E generation */
     uint8_t seedSE_expanded[1 + 64]; /* 0x5F || SHAKE(seedSE) */
@@ -150,6 +161,7 @@ void frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
     pqc_memzero(seedSE_expanded, sizeof(seedSE_expanded));
     pqc_memzero(s_val, sizeof(s_val));
     free(A); free(S); free(E); free(B); free(S_T);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -159,7 +171,7 @@ void frodo_keygen_internal(uint8_t *pk, uint8_t *sk,
 /* ss = SHAKE(C1 || C2 || k || pkh) where k = SHAKE(mu || pkh)         */
 /* ------------------------------------------------------------------ */
 
-void frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
+int frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
                            const uint8_t *pk,
                            const frodo_params_t *params,
                            const uint16_t *cdf, uint32_t cdf_len)
@@ -190,7 +202,7 @@ void frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
     if (!A || !B || !Sp || !Ep || !Epp || !C1 || !C2 || !V || !enc_mu) {
         free(A); free(B); free(Sp); free(Ep); free(Epp);
         free(C1); free(C2); free(V); free(enc_mu);
-        return;
+        return -1;
     }
 
     /* Generate A */
@@ -199,9 +211,14 @@ void frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
     /* Unpack B */
     frodo_unpack(B, B_packed, n * n_bar, log_q);
 
-    /* Generate random mu */
+    /* Generate random mu (see note in frodo_keygen_internal) */
     uint8_t mu[FRODO_MAX_LEN_MU / 8 + 1];
-    pqc_randombytes(mu, mu_bytes);
+    if (pqc_randombytes(mu, mu_bytes) != PQC_OK) {
+        pqc_memzero(mu, sizeof(mu));
+        free(A); free(B); free(Sp); free(Ep); free(Epp);
+        free(C1); free(C2); free(V); free(enc_mu);
+        return -1;
+    }
 
     /* Hash pk */
     uint8_t pkh[FRODO_MAX_LEN_PKH];
@@ -269,6 +286,7 @@ void frodo_encaps_internal(uint8_t *ct, uint8_t *ss,
     pqc_memzero(Sp, (size_t)n_bar * n * sizeof(uint16_t));
     free(A); free(B); free(Sp); free(Ep); free(Epp);
     free(C1); free(C2); free(V); free(enc_mu);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -399,20 +417,20 @@ int frodo_decaps_internal(uint8_t *ss, const uint8_t *ct,
     frodo_encode(enc_mu, mu_prime, len_mu, b_param, q);
     frodo_matrix_add(C2_p, V_p, enc_mu, n_bar, n_bar, q);
 
-    /* Compare C1 == C1' and C2 == C2' (constant time) */
-    int valid = 1;
+    /*
+     * Compare C1 == C1' and C2 == C2' (constant time).  The result
+     * selects which secret is derived below; it must not branch in a
+     * way that reveals the outcome to the caller.
+     */
+    int valid = 0;
     {
         /* Pack both and compare bytes */
         uint8_t *ct_prime = (uint8_t *)calloc(params->ct_bytes, 1);
         if (ct_prime) {
             frodo_pack(ct_prime, C1_p, n_bar * n, log_q);
             frodo_pack(ct_prime + c1_packed_bytes, C2_p, n_bar * n_bar, log_q);
-            if (pqc_memcmp_ct(ct, ct_prime, params->ct_bytes) != 0) {
-                valid = 0;
-            }
+            valid = (pqc_memcmp_ct(ct, ct_prime, params->ct_bytes) == 0);
             free(ct_prime);
-        } else {
-            valid = 0;
         }
     }
 
@@ -449,7 +467,11 @@ int frodo_decaps_internal(uint8_t *ss, const uint8_t *ct,
     free(Sp_p); free(Ep_p); free(Epp_p);
     free(A); free(B); free(C1_p); free(C2_p); free(V_p); free(enc_mu);
 
-    return valid ? 0 : -1;
+    /*
+     * Always report success -- see the note in hqc_decaps_internal.
+     * ss already holds the real or implicit-rejection secret.
+     */
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -462,7 +484,8 @@ static pqc_status_t frodo640aes_keygen(uint8_t *pk, uint8_t *sk)
 {
     frodo_params_t p;
     frodo_params_init_640(&p, FRODO_MATRIX_A_AES);
-    frodo_keygen_internal(pk, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
+    if (frodo_keygen_internal(pk, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -470,7 +493,8 @@ static pqc_status_t frodo640aes_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *
 {
     frodo_params_t p;
     frodo_params_init_640(&p, FRODO_MATRIX_A_AES);
-    frodo_encaps_internal(ct, ss, pk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
+    if (frodo_encaps_internal(ct, ss, pk, &p, frodo_640_cdf, FRODO_640_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -478,15 +502,17 @@ static pqc_status_t frodo640aes_decaps(uint8_t *ss, const uint8_t *ct, const uin
 {
     frodo_params_t p;
     frodo_params_init_640(&p, FRODO_MATRIX_A_AES);
-    int rc = frodo_decaps_internal(ss, ct, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)frodo_decaps_internal(ss, ct, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
+    return PQC_OK;
 }
 
 static pqc_status_t frodo640shake_keygen(uint8_t *pk, uint8_t *sk)
 {
     frodo_params_t p;
     frodo_params_init_640(&p, FRODO_MATRIX_A_SHAKE);
-    frodo_keygen_internal(pk, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
+    if (frodo_keygen_internal(pk, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -494,7 +520,8 @@ static pqc_status_t frodo640shake_encaps(uint8_t *ct, uint8_t *ss, const uint8_t
 {
     frodo_params_t p;
     frodo_params_init_640(&p, FRODO_MATRIX_A_SHAKE);
-    frodo_encaps_internal(ct, ss, pk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
+    if (frodo_encaps_internal(ct, ss, pk, &p, frodo_640_cdf, FRODO_640_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -502,8 +529,9 @@ static pqc_status_t frodo640shake_decaps(uint8_t *ss, const uint8_t *ct, const u
 {
     frodo_params_t p;
     frodo_params_init_640(&p, FRODO_MATRIX_A_SHAKE);
-    int rc = frodo_decaps_internal(ss, ct, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)frodo_decaps_internal(ss, ct, sk, &p, frodo_640_cdf, FRODO_640_CDF_LEN);
+    return PQC_OK;
 }
 
 /* --- FrodoKEM-976 --- */
@@ -512,7 +540,8 @@ static pqc_status_t frodo976aes_keygen(uint8_t *pk, uint8_t *sk)
 {
     frodo_params_t p;
     frodo_params_init_976(&p, FRODO_MATRIX_A_AES);
-    frodo_keygen_internal(pk, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
+    if (frodo_keygen_internal(pk, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -520,7 +549,8 @@ static pqc_status_t frodo976aes_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *
 {
     frodo_params_t p;
     frodo_params_init_976(&p, FRODO_MATRIX_A_AES);
-    frodo_encaps_internal(ct, ss, pk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
+    if (frodo_encaps_internal(ct, ss, pk, &p, frodo_976_cdf, FRODO_976_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -528,15 +558,17 @@ static pqc_status_t frodo976aes_decaps(uint8_t *ss, const uint8_t *ct, const uin
 {
     frodo_params_t p;
     frodo_params_init_976(&p, FRODO_MATRIX_A_AES);
-    int rc = frodo_decaps_internal(ss, ct, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)frodo_decaps_internal(ss, ct, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
+    return PQC_OK;
 }
 
 static pqc_status_t frodo976shake_keygen(uint8_t *pk, uint8_t *sk)
 {
     frodo_params_t p;
     frodo_params_init_976(&p, FRODO_MATRIX_A_SHAKE);
-    frodo_keygen_internal(pk, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
+    if (frodo_keygen_internal(pk, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -544,7 +576,8 @@ static pqc_status_t frodo976shake_encaps(uint8_t *ct, uint8_t *ss, const uint8_t
 {
     frodo_params_t p;
     frodo_params_init_976(&p, FRODO_MATRIX_A_SHAKE);
-    frodo_encaps_internal(ct, ss, pk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
+    if (frodo_encaps_internal(ct, ss, pk, &p, frodo_976_cdf, FRODO_976_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -552,8 +585,9 @@ static pqc_status_t frodo976shake_decaps(uint8_t *ss, const uint8_t *ct, const u
 {
     frodo_params_t p;
     frodo_params_init_976(&p, FRODO_MATRIX_A_SHAKE);
-    int rc = frodo_decaps_internal(ss, ct, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)frodo_decaps_internal(ss, ct, sk, &p, frodo_976_cdf, FRODO_976_CDF_LEN);
+    return PQC_OK;
 }
 
 /* --- FrodoKEM-1344 --- */
@@ -562,7 +596,8 @@ static pqc_status_t frodo1344aes_keygen(uint8_t *pk, uint8_t *sk)
 {
     frodo_params_t p;
     frodo_params_init_1344(&p, FRODO_MATRIX_A_AES);
-    frodo_keygen_internal(pk, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
+    if (frodo_keygen_internal(pk, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -570,7 +605,8 @@ static pqc_status_t frodo1344aes_encaps(uint8_t *ct, uint8_t *ss, const uint8_t 
 {
     frodo_params_t p;
     frodo_params_init_1344(&p, FRODO_MATRIX_A_AES);
-    frodo_encaps_internal(ct, ss, pk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
+    if (frodo_encaps_internal(ct, ss, pk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -578,15 +614,17 @@ static pqc_status_t frodo1344aes_decaps(uint8_t *ss, const uint8_t *ct, const ui
 {
     frodo_params_t p;
     frodo_params_init_1344(&p, FRODO_MATRIX_A_AES);
-    int rc = frodo_decaps_internal(ss, ct, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)frodo_decaps_internal(ss, ct, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
+    return PQC_OK;
 }
 
 static pqc_status_t frodo1344shake_keygen(uint8_t *pk, uint8_t *sk)
 {
     frodo_params_t p;
     frodo_params_init_1344(&p, FRODO_MATRIX_A_SHAKE);
-    frodo_keygen_internal(pk, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
+    if (frodo_keygen_internal(pk, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -594,7 +632,8 @@ static pqc_status_t frodo1344shake_encaps(uint8_t *ct, uint8_t *ss, const uint8_
 {
     frodo_params_t p;
     frodo_params_init_1344(&p, FRODO_MATRIX_A_SHAKE);
-    frodo_encaps_internal(ct, ss, pk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
+    if (frodo_encaps_internal(ct, ss, pk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -602,8 +641,9 @@ static pqc_status_t frodo1344shake_decaps(uint8_t *ss, const uint8_t *ct, const 
 {
     frodo_params_t p;
     frodo_params_init_1344(&p, FRODO_MATRIX_A_SHAKE);
-    int rc = frodo_decaps_internal(ss, ct, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)frodo_decaps_internal(ss, ct, sk, &p, frodo_1344_cdf, FRODO_1344_CDF_LEN);
+    return PQC_OK;
 }
 
 /* ------------------------------------------------------------------ */

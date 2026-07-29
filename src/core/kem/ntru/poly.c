@@ -174,26 +174,14 @@ int ntru_poly_inv_mod_q(ntru_poly_t *r, const ntru_poly_t *f,
     if ((sum & 1) == 0)
         return -1; /* f not invertible mod 2 */
 
-    /* Extended GCD approach for mod 2:
-     * Use the polynomial "almost inverse" method. */
-    int16_t b_arr[NTRU_MAX_N], c_arr[NTRU_MAX_N];
-    int16_t f_arr[NTRU_MAX_N], g_arr[NTRU_MAX_N];
-
-    memset(b_arr, 0, sizeof(b_arr));
-    memset(c_arr, 0, sizeof(c_arr));
-    memset(f_arr, 0, sizeof(f_arr));
-    memset(g_arr, 0, sizeof(g_arr));
-
-    b_arr[0] = 1;
-    for (int i = 0; i < n; i++)
-        f_arr[i] = (int16_t)(f->coeffs[i] & 1);
-    g_arr[0] = 1; /* x^n - 1 mod 2 = x^n + 1, with g representing x^n - 1 */
-    g_arr[n] = 0; /* We work in the quotient ring directly */
-
-    /* Actually, let's use a simpler approach: Newton lifting.
-     * Start with any inverse mod 2 and lift to mod q.
+    /*
+     * Invert by Newton lifting: start from the inverse mod 2 (which is
+     * 1 whenever f[0] is odd) and double the precision each step.
      *
-     * For mod 2: f_inv = 1 works if f[0] is odd. Then Newton iterate.
+     * An earlier draft set up extended-GCD scratch arrays here and then
+     * abandoned them unused.  They were sized NTRU_MAX_N but indexed at
+     * [n], which for the n = 821 parameter set is one past the end --
+     * a stack buffer overrun on every NTRU-HPS-4096-821 key generation.
      */
     ntru_poly_zero(&inv);
     inv.coeffs[0] = 1;

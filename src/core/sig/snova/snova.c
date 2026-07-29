@@ -273,7 +273,11 @@ static pqc_status_t snova_sign_impl(uint8_t *sig, size_t *siglen,
             size_t packed = (vin_bytes + 1) / 2;
             uint8_t *buf = (uint8_t *)pqc_calloc(1, packed);
             if (!buf) { rc = PQC_ERROR_ALLOC; goto cleanup; }
-            pqc_randombytes(buf, packed);
+            if (pqc_randombytes(buf, packed) != PQC_OK) {
+                pqc_free(buf, packed);
+                rc = PQC_ERROR_RNG_FAILED;
+                goto cleanup;
+            }
             for (i = 0; (size_t)i < vin_bytes; i++) {
                 if (i % 2 == 0) {
                     vin_vals[i] = (buf[i / 2] >> 4) & 0x0F;
@@ -341,7 +345,6 @@ static pqc_status_t snova_sign_impl(uint8_t *sig, size_t *siglen,
     }
 
     /* Pack signature: salt (16) || packed GF(16) values for n ring elements */
-    memcpy(sig, salt, 16);
     {
         size_t pos = 16;
         size_t total_elems = (size_t)n * rsz;
@@ -349,6 +352,17 @@ static pqc_status_t snova_sign_impl(uint8_t *sig, size_t *siglen,
         uint8_t *packed = sig + 16;
         size_t idx_e = 0;
 
+        /*
+         * The caller allocated params->sig_len bytes.  Refuse rather
+         * than write past it if the declared size and the packed size
+         * ever disagree again.
+         */
+        if (16 + packed_bytes > params->sig_len) {
+            rc = PQC_ERROR_INTERNAL;
+            goto cleanup;
+        }
+
+        memcpy(sig, salt, 16);
         memset(packed, 0, packed_bytes);
 
         /* Write vinegar values */
@@ -414,7 +428,13 @@ static pqc_status_t snova_verify_impl(const uint8_t *msg, size_t msglen,
     const uint8_t *packed;
     pqc_status_t rc;
 
-    (void)siglen;
+    /*
+     * siglen is attacker-controlled; validate before reading the fixed
+     * offsets below.
+     */
+    if (siglen != 16 + (((size_t)n * rsz + 1) / 2)) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
 
     salt = sig;
     packed = sig + 16;

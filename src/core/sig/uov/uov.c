@@ -325,7 +325,10 @@ static pqc_status_t uov_verify_impl(const uint8_t *msg, size_t msglen,
     const uint8_t *x_vec;
     pqc_status_t rc;
 
-    (void)siglen;
+    /* siglen is attacker-controlled; validate before reading below. */
+    if (siglen != params->sig_len) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
 
     salt = sig;
     x_vec = sig + 16;

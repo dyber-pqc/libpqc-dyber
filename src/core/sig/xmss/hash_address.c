@@ -84,6 +84,25 @@ void xmss_addr_set_hash(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t hash)
     addr_store_u32(addr, 24, hash);
 }
 
+/*
+ * keyAndMask selector (RFC 8391 word 7, offset 28).
+ *
+ * This MUST be a distinct field from the hash address / tree index at
+ * offset 24: the hash routines vary it to derive the key and bitmasks,
+ * and doing so must not disturb the caller's chain position or node
+ * index.
+ */
+void xmss_addr_set_key_and_mask(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t kam)
+{
+    addr_store_u32(addr, 28, kam);
+}
+
+uint32_t xmss_addr_get_ots(const uint8_t addr[PQC_XMSS_ADDR_BYTES])
+{
+    return ((uint32_t)addr[16] << 24) | ((uint32_t)addr[17] << 16) |
+           ((uint32_t)addr[18] << 8)  | (uint32_t)addr[19];
+}
+
 void xmss_addr_set_ltree(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t ltree)
 {
     addr_store_u32(addr, 16, ltree);

@@ -217,7 +217,7 @@ static void code_bytes_to_vect(uint64_t *dest, const uint8_t *src,
 /* Internal keygen                                                      */
 /* ------------------------------------------------------------------ */
 
-void hqc_keygen_internal(uint8_t *pk, uint8_t *sk,
+int hqc_keygen_internal(uint8_t *pk, uint8_t *sk,
                          const hqc_params_t *params)
 {
     uint32_t n = params->n;
@@ -229,9 +229,17 @@ void hqc_keygen_internal(uint8_t *pk, uint8_t *sk,
     uint64_t h[HQC_VEC_N_WORDS];
     uint64_t tmp[HQC_VEC_N_WORDS];
 
-    /* Generate random seeds */
-    pqc_randombytes(seed_sk, HQC_SEED_BYTES);
-    pqc_randombytes(seed_pk, HQC_SEED_BYTES);
+    /*
+     * Generate random seeds.  A caller-supplied RNG that fails leaves
+     * these buffers untouched, so the key would be derived from
+     * whatever was already on the stack.  Refuse instead.
+     */
+    if (pqc_randombytes(seed_sk, HQC_SEED_BYTES) != PQC_OK ||
+        pqc_randombytes(seed_pk, HQC_SEED_BYTES) != PQC_OK) {
+        pqc_memzero(seed_sk, HQC_SEED_BYTES);
+        pqc_memzero(seed_pk, HQC_SEED_BYTES);
+        return -1;
+    }
 
     /* Derive x (weight w) and y (weight w) from seed_sk */
     uint8_t domain_x[HQC_SEED_BYTES + 1];
@@ -261,13 +269,14 @@ void hqc_keygen_internal(uint8_t *pk, uint8_t *sk,
     pqc_memzero(seed_sk, sizeof(seed_sk));
     pqc_memzero(x, sizeof(x));
     pqc_memzero(y, sizeof(y));
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* Internal encaps                                                      */
 /* ------------------------------------------------------------------ */
 
-void hqc_encaps_internal(uint8_t *ct, uint8_t *ss,
+int hqc_encaps_internal(uint8_t *ct, uint8_t *ss,
                          const uint8_t *pk,
                          const hqc_params_t *params)
 {
@@ -292,11 +301,13 @@ void hqc_encaps_internal(uint8_t *ct, uint8_t *ss,
     hqc_pk_unpack(seed_pk, h, pk, params);
     hqc_vect_set_random(s, n, seed_pk, HQC_SEED_BYTES);
 
-    /* Generate random message m */
-    pqc_randombytes(m, k);
-
-    /* Generate salt */
-    pqc_randombytes(salt, HQC_SALT_SIZE_BYTES);
+    /* Generate random message m and salt (see note in hqc_keygen_internal) */
+    if (pqc_randombytes(m, k) != PQC_OK ||
+        pqc_randombytes(salt, HQC_SALT_SIZE_BYTES) != PQC_OK) {
+        pqc_memzero(m, k);
+        pqc_memzero(salt, HQC_SALT_SIZE_BYTES);
+        return -1;
+    }
 
     /* Derive theta = SHA512(m || pk || salt) for randomness */
     {
@@ -382,6 +393,7 @@ void hqc_encaps_internal(uint8_t *ct, uint8_t *ss,
     pqc_memzero(r1, sizeof(r1));
     pqc_memzero(r2, sizeof(r2));
     pqc_memzero(e, sizeof(e));
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -515,20 +527,22 @@ int hqc_decaps_internal(uint8_t *ss, const uint8_t *ct,
         }
     }
 
-    /* Compare u == u' and v == v' */
+    /*
+     * Compare u == u' and v == v' without an early exit: a data-
+     * dependent break would leak through timing the same bit the
+     * implicit rejection below exists to hide.
+     */
     uint32_t n_words = (n + 63) / 64;
-    int valid = (decode_rc == 0) ? 1 : 0;
+    uint64_t ct_diff = 0;
 
-    if (valid) {
-        for (uint32_t i = 0; i < n_words; i++) {
-            if (u[i] != up[i]) { valid = 0; break; }
-        }
+    for (uint32_t i = 0; i < n_words; i++) {
+        ct_diff |= u[i] ^ up[i];
     }
-    if (valid) {
-        for (uint32_t i = 0; i < n1n2_words; i++) {
-            if (v[i] != vp[i]) { valid = 0; break; }
-        }
+    for (uint32_t i = 0; i < n1n2_words; i++) {
+        ct_diff |= v[i] ^ vp[i];
     }
+
+    int valid = (decode_rc == 0) && (ct_diff == 0);
 
     /* Compute shared secret */
     if (valid) {
@@ -554,7 +568,14 @@ int hqc_decaps_internal(uint8_t *ss, const uint8_t *ct,
     pqc_memzero(m_prime, sizeof(m_prime));
     pqc_memzero(theta_seed, sizeof(theta_seed));
 
-    return valid ? 0 : -1;
+    /*
+     * Always report success.  ss already holds either the real shared
+     * secret or the implicit-rejection value, and the whole point of
+     * implicit rejection is that an attacker cannot tell which.
+     * Returning the validity bit here would hand them a
+     * plaintext-checking oracle through the public API.
+     */
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -565,7 +586,8 @@ static pqc_status_t hqc128_keygen(uint8_t *pk, uint8_t *sk)
 {
     hqc_params_t p;
     hqc_params_init_128(&p);
-    hqc_keygen_internal(pk, sk, &p);
+    if (hqc_keygen_internal(pk, sk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -573,7 +595,8 @@ static pqc_status_t hqc128_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *pk)
 {
     hqc_params_t p;
     hqc_params_init_128(&p);
-    hqc_encaps_internal(ct, ss, pk, &p);
+    if (hqc_encaps_internal(ct, ss, pk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -581,15 +604,17 @@ static pqc_status_t hqc128_decaps(uint8_t *ss, const uint8_t *ct, const uint8_t 
 {
     hqc_params_t p;
     hqc_params_init_128(&p);
-    int rc = hqc_decaps_internal(ss, ct, sk, &p);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)hqc_decaps_internal(ss, ct, sk, &p);
+    return PQC_OK;
 }
 
 static pqc_status_t hqc192_keygen(uint8_t *pk, uint8_t *sk)
 {
     hqc_params_t p;
     hqc_params_init_192(&p);
-    hqc_keygen_internal(pk, sk, &p);
+    if (hqc_keygen_internal(pk, sk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -597,7 +622,8 @@ static pqc_status_t hqc192_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *pk)
 {
     hqc_params_t p;
     hqc_params_init_192(&p);
-    hqc_encaps_internal(ct, ss, pk, &p);
+    if (hqc_encaps_internal(ct, ss, pk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -605,15 +631,17 @@ static pqc_status_t hqc192_decaps(uint8_t *ss, const uint8_t *ct, const uint8_t 
 {
     hqc_params_t p;
     hqc_params_init_192(&p);
-    int rc = hqc_decaps_internal(ss, ct, sk, &p);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)hqc_decaps_internal(ss, ct, sk, &p);
+    return PQC_OK;
 }
 
 static pqc_status_t hqc256_keygen(uint8_t *pk, uint8_t *sk)
 {
     hqc_params_t p;
     hqc_params_init_256(&p);
-    hqc_keygen_internal(pk, sk, &p);
+    if (hqc_keygen_internal(pk, sk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -621,7 +649,8 @@ static pqc_status_t hqc256_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *pk)
 {
     hqc_params_t p;
     hqc_params_init_256(&p);
-    hqc_encaps_internal(ct, ss, pk, &p);
+    if (hqc_encaps_internal(ct, ss, pk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -629,8 +658,9 @@ static pqc_status_t hqc256_decaps(uint8_t *ss, const uint8_t *ct, const uint8_t 
 {
     hqc_params_t p;
     hqc_params_init_256(&p);
-    int rc = hqc_decaps_internal(ss, ct, sk, &p);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)hqc_decaps_internal(ss, ct, sk, &p);
+    return PQC_OK;
 }
 
 /* ------------------------------------------------------------------ */

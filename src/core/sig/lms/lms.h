@@ -50,8 +50,17 @@ int  lmots_verify(const uint8_t *msg, size_t msglen,
 /* HSS multi-tree (hss.c)                                               */
 /* ------------------------------------------------------------------ */
 
-void hss_compute_root(uint8_t *root, const uint8_t *I,
-                      const uint8_t *seed, int h);
+/*
+ * Compute the Merkle root, and optionally the authentication path for
+ * one leaf, from the real tree.  Returns 0 on success, -1 if the height
+ * is not computable or on allocation failure.
+ */
+int hss_compute_root_and_path(uint8_t *root, uint8_t *auth_path,
+                              const uint8_t *I, const uint8_t *seed,
+                              int h, uint32_t target);
+
+int hss_compute_root(uint8_t *root, const uint8_t *I,
+                     const uint8_t *seed, int h);
 
 #ifdef __cplusplus
 }

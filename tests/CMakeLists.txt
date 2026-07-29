@@ -36,6 +36,16 @@ target_include_directories(test_fndsa_quick PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_fndsa_quick COMMAND test_fndsa_quick)
 set_tests_properties(test_fndsa_quick PROPERTIES TIMEOUT 120)
 
+# Security audit regression tests.
+# Needs the internal source tree for the address/parameter invariants.
+add_executable(test_security_audit unit/test_security_audit.c)
+target_link_libraries(test_security_audit PRIVATE pqc_static)
+target_include_directories(test_security_audit PRIVATE
+    ${PQC_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+add_test(NAME test_security_audit COMMAND test_security_audit)
+set_tests_properties(test_security_audit PROPERTIES TIMEOUT 600)
+
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)
     # Common include path for bench_common.h

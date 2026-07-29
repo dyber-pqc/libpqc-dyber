@@ -16,6 +16,18 @@
 
 #define PQC_SNOVA_Q   16
 
+/*
+ * Signature encoding: 16-byte salt followed by n ring elements, each
+ * l*l GF(16) nibbles, packed two per byte.
+ *
+ * These sizes MUST be derived from the parameters rather than written
+ * out by hand: the serialiser in snova_sign_impl computes the packed
+ * length from (n, l) at runtime, and a hand-written constant that
+ * disagrees with it is a heap buffer overflow in every call to sign().
+ */
+#define PQC_SNOVA_SIGBYTES(n, l) \
+    (16 + (((size_t)(n) * (size_t)(l) * (size_t)(l) + 1) / 2))
+
 /* ------------------------------------------------------------------ */
 /* SNOVA-24-5-4: v=24, o=5, l=4, q=16, Level 1                         */
 /* n = v + o = 29                                                       */
@@ -27,7 +39,9 @@
 #define PQC_SNOVA_24_5_4_L                  4
 #define PQC_SNOVA_24_5_4_PUBLICKEYBYTES     1016
 #define PQC_SNOVA_24_5_4_SECRETKEYBYTES     48
-#define PQC_SNOVA_24_5_4_SIGBYTES           100
+/* 16 + ceil(29 * 4 * 4 / 2) = 16 + 232 = 248 */
+#define PQC_SNOVA_24_5_4_SIGBYTES \
+    PQC_SNOVA_SIGBYTES(PQC_SNOVA_24_5_4_N, PQC_SNOVA_24_5_4_L)
 
 /* ------------------------------------------------------------------ */
 /* SNOVA-25-8-3: v=25, o=8, l=3, q=16, Level 3                         */
@@ -40,7 +54,9 @@
 #define PQC_SNOVA_25_8_3_L                  3
 #define PQC_SNOVA_25_8_3_PUBLICKEYBYTES     1400
 #define PQC_SNOVA_25_8_3_SECRETKEYBYTES     48
-#define PQC_SNOVA_25_8_3_SIGBYTES           164
+/* 16 + ceil(33 * 3 * 3 / 2) = 16 + 149 = 165 */
+#define PQC_SNOVA_25_8_3_SIGBYTES \
+    PQC_SNOVA_SIGBYTES(PQC_SNOVA_25_8_3_N, PQC_SNOVA_25_8_3_L)
 
 /* ------------------------------------------------------------------ */
 /* SNOVA-28-17-3: v=28, o=17, l=3, q=16, Level 5                       */
@@ -53,7 +69,9 @@
 #define PQC_SNOVA_28_17_3_L                 3
 #define PQC_SNOVA_28_17_3_PUBLICKEYBYTES    5872
 #define PQC_SNOVA_28_17_3_SECRETKEYBYTES    64
-#define PQC_SNOVA_28_17_3_SIGBYTES          580
+/* 16 + ceil(45 * 3 * 3 / 2) = 16 + 203 = 219 */
+#define PQC_SNOVA_28_17_3_SIGBYTES \
+    PQC_SNOVA_SIGBYTES(PQC_SNOVA_28_17_3_N, PQC_SNOVA_28_17_3_L)
 
 /* ------------------------------------------------------------------ */
 /* Maximum values for static buffers                                    */

@@ -173,7 +173,7 @@ static void bike_hash_k(uint8_t *ss,
 /* Internal keygen                                                      */
 /* ------------------------------------------------------------------ */
 
-void bike_keygen_internal(uint8_t *pk, uint8_t *sk,
+int bike_keygen_internal(uint8_t *pk, uint8_t *sk,
                           const bike_params_t *params)
 {
     uint32_t r = params->r;
@@ -187,14 +187,21 @@ void bike_keygen_internal(uint8_t *pk, uint8_t *sk,
 
     if (!h0 || !h1 || !h0_inv || !h) {
         free(h0); free(h1); free(h0_inv); free(h);
-        return;
+        return -1;
     }
 
-    /* Generate random seed */
-    pqc_randombytes(seed, BIKE_SEED_BYTES);
-
-    /* Generate sigma for implicit rejection */
-    pqc_randombytes(sigma, BIKE_SHARED_SECRET_BYTES);
+    /*
+     * A caller-supplied RNG that fails leaves these buffers untouched,
+     * so the key would be derived from whatever was already on the
+     * stack.  Refuse instead.
+     */
+    if (pqc_randombytes(seed, BIKE_SEED_BYTES) != PQC_OK ||
+        pqc_randombytes(sigma, BIKE_SHARED_SECRET_BYTES) != PQC_OK) {
+        pqc_memzero(seed, BIKE_SEED_BYTES);
+        pqc_memzero(sigma, BIKE_SHARED_SECRET_BYTES);
+        free(h0); free(h1); free(h0_inv); free(h);
+        return -1;
+    }
 
     /* Sample h0 and h1 as sparse polynomials of weight w/2 */
     uint8_t domain_h0[BIKE_SEED_BYTES + 1];
@@ -223,13 +230,14 @@ void bike_keygen_internal(uint8_t *pk, uint8_t *sk,
     pqc_memzero(h1, r_words * sizeof(uint64_t));
     pqc_memzero(h0_inv, r_words * sizeof(uint64_t));
     free(h0); free(h1); free(h0_inv); free(h);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* Internal encaps                                                      */
 /* ------------------------------------------------------------------ */
 
-void bike_encaps_internal(uint8_t *ct, uint8_t *ss,
+int bike_encaps_internal(uint8_t *ct, uint8_t *ss,
                           const uint8_t *pk,
                           const bike_params_t *params)
 {
@@ -243,7 +251,7 @@ void bike_encaps_internal(uint8_t *ct, uint8_t *ss,
 
     if (!h || !e0 || !e1 || !c0) {
         free(h); free(e0); free(e1); free(c0);
-        return;
+        return -1;
     }
 
     /* Unpack public key */
@@ -251,7 +259,11 @@ void bike_encaps_internal(uint8_t *ct, uint8_t *ss,
 
     /* Sample error (e0, e1) of weight t */
     uint8_t error_seed[BIKE_SEED_BYTES];
-    pqc_randombytes(error_seed, BIKE_SEED_BYTES);
+    if (pqc_randombytes(error_seed, BIKE_SEED_BYTES) != PQC_OK) {
+        pqc_memzero(error_seed, sizeof(error_seed));
+        free(h); free(e0); free(e1); free(c0);
+        return -1;
+    }
     bike_sample_error(e0, e1, params->t, r, error_seed, BIKE_SEED_BYTES);
 
     /* Compute c0 = e0 + e1 * h mod (x^r - 1) */
@@ -279,6 +291,7 @@ void bike_encaps_internal(uint8_t *ct, uint8_t *ss,
     pqc_memzero(e0, r_words * sizeof(uint64_t));
     pqc_memzero(e1, r_words * sizeof(uint64_t));
     free(h); free(e0); free(e1); free(c0);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,14 +339,14 @@ int bike_decaps_internal(uint8_t *ss, const uint8_t *ct,
     uint8_t c1_hash_prime[BIKE_SHARED_SECRET_BYTES];
     bike_hash_e(c1_hash_prime, e0_prime, e1_prime, params);
 
-    int valid = (decode_ok == 0) ? 1 : 0;
-    if (valid) {
-        /* Constant-time comparison */
-        if (pqc_memcmp_ct(c1_hash, c1_hash_prime,
-                          BIKE_SHARED_SECRET_BYTES) != 0) {
-            valid = 0;
-        }
-    }
+    /*
+     * Evaluate both conditions unconditionally: branching on the
+     * comparison would leak through timing the same bit the implicit
+     * rejection below exists to hide.
+     */
+    int cmp_eq = (pqc_memcmp_ct(c1_hash, c1_hash_prime,
+                                BIKE_SHARED_SECRET_BYTES) == 0);
+    int valid = (decode_ok == 0) && cmp_eq;
 
     if (valid) {
         /* ss = K(e0' || e1' || ct) */
@@ -357,7 +370,14 @@ int bike_decaps_internal(uint8_t *ss, const uint8_t *ct,
     free(h0); free(h1); free(c0); free(syndrome);
     free(e0_prime); free(e1_prime);
 
-    return valid ? 0 : -1;
+    /*
+     * Always report success -- see the note in hqc_decaps_internal.
+     * ss already holds the real or implicit-rejection secret, and
+     * returning the validity bit would expose a decoding-failure
+     * oracle, which is a known key-recovery avenue against
+     * code-based KEMs.
+     */
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -368,7 +388,8 @@ static pqc_status_t bike_l1_keygen(uint8_t *pk, uint8_t *sk)
 {
     bike_params_t p;
     bike_params_init_l1(&p);
-    bike_keygen_internal(pk, sk, &p);
+    if (bike_keygen_internal(pk, sk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -376,7 +397,8 @@ static pqc_status_t bike_l1_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *pk)
 {
     bike_params_t p;
     bike_params_init_l1(&p);
-    bike_encaps_internal(ct, ss, pk, &p);
+    if (bike_encaps_internal(ct, ss, pk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -384,15 +406,17 @@ static pqc_status_t bike_l1_decaps(uint8_t *ss, const uint8_t *ct, const uint8_t
 {
     bike_params_t p;
     bike_params_init_l1(&p);
-    int rc = bike_decaps_internal(ss, ct, sk, &p);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)bike_decaps_internal(ss, ct, sk, &p);
+    return PQC_OK;
 }
 
 static pqc_status_t bike_l3_keygen(uint8_t *pk, uint8_t *sk)
 {
     bike_params_t p;
     bike_params_init_l3(&p);
-    bike_keygen_internal(pk, sk, &p);
+    if (bike_keygen_internal(pk, sk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -400,7 +424,8 @@ static pqc_status_t bike_l3_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *pk)
 {
     bike_params_t p;
     bike_params_init_l3(&p);
-    bike_encaps_internal(ct, ss, pk, &p);
+    if (bike_encaps_internal(ct, ss, pk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -408,15 +433,17 @@ static pqc_status_t bike_l3_decaps(uint8_t *ss, const uint8_t *ct, const uint8_t
 {
     bike_params_t p;
     bike_params_init_l3(&p);
-    int rc = bike_decaps_internal(ss, ct, sk, &p);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)bike_decaps_internal(ss, ct, sk, &p);
+    return PQC_OK;
 }
 
 static pqc_status_t bike_l5_keygen(uint8_t *pk, uint8_t *sk)
 {
     bike_params_t p;
     bike_params_init_l5(&p);
-    bike_keygen_internal(pk, sk, &p);
+    if (bike_keygen_internal(pk, sk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -424,7 +451,8 @@ static pqc_status_t bike_l5_encaps(uint8_t *ct, uint8_t *ss, const uint8_t *pk)
 {
     bike_params_t p;
     bike_params_init_l5(&p);
-    bike_encaps_internal(ct, ss, pk, &p);
+    if (bike_encaps_internal(ct, ss, pk, &p) != 0)
+        return PQC_ERROR_RNG_FAILED;
     return PQC_OK;
 }
 
@@ -432,8 +460,9 @@ static pqc_status_t bike_l5_decaps(uint8_t *ss, const uint8_t *ct, const uint8_t
 {
     bike_params_t p;
     bike_params_init_l5(&p);
-    int rc = bike_decaps_internal(ss, ct, sk, &p);
-    return (rc == 0) ? PQC_OK : PQC_ERROR_DECAPSULATION_FAILED;
+    /* Always PQC_OK: the validity bit must not escape (implicit rejection). */
+    (void)bike_decaps_internal(ss, ct, sk, &p);
+    return PQC_OK;
 }
 
 /* ------------------------------------------------------------------ */

@@ -147,6 +147,14 @@ pqc_status_t pqc_sig_verify(const PQC_SIG *sig,
                              const uint8_t *public_key) {
     if (!sig || !message || !signature || !public_key)
         return PQC_ERROR_INVALID_ARGUMENT;
+    /*
+     * signature_len is attacker-controlled in any realistic deployment.
+     * Reject anything longer than the algorithm can produce before
+     * dispatching; each implementation additionally validates its own
+     * exact or minimum length.
+     */
+    if (signature_len == 0 || signature_len > sig->vtable->max_signature_size)
+        return PQC_ERROR_VERIFICATION_FAILED;
     return sig->vtable->verify(message, message_len, signature, signature_len,
                                public_key);
 }
