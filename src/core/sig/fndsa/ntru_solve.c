@@ -22,10 +22,34 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #include "fndsa.h"
 #include "fndsa_params.h"
 #include "fft.h"
+
+/*
+ * Convert a double to int32_t with a defined result for every input.
+ *
+ * Converting a floating-point value that is outside the destination
+ * integer's range -- or NaN -- is undefined behaviour in C, not a
+ * wrapping conversion.  The NTRU solver can diverge and produce
+ * magnitudes far beyond int32_t (values around 1e15 have been observed
+ * during key generation), so the conversion must be guarded rather than
+ * assumed in range.
+ *
+ * Clamping keeps the conversion defined; a clamped coefficient is
+ * nonsense as a solution, but the caller's own norm and correctness
+ * checks reject it, which is the intended failure path.
+ */
+static inline int32_t fpr_to_i32(double x)
+{
+    /* Written so that NaN takes the first branch rather than falling
+     * through to the cast. */
+    if (!(x >= -2147483648.0)) return INT32_MIN;
+    if (x > 2147483647.0)      return INT32_MAX;
+    return (int32_t)x;
+}
 
 /* Working prime.  Must be > 2*q and fit in int64_t after squaring. */
 #define MOD_P  1073741789LL  /* prime near 2^30 */
@@ -131,8 +155,8 @@ ntru_lift_fft(unsigned logn,
     fndsa_fft_inverse(t3, logn);
 
     for (i = 0; i < n; i++) {
-        F[i] = (int32_t)floor(t2[i] + 0.5);
-        G[i] = (int32_t)floor(t3[i] + 0.5);
+        F[i] = fpr_to_i32(floor(t2[i] + 0.5));
+        G[i] = fpr_to_i32(floor(t3[i] + 0.5));
     }
 
     /* Babai reduction. */
@@ -174,7 +198,7 @@ ntru_lift_fft(unsigned logn,
             for (i = 0; i < n; i++) { Fn[i] = F[i]; Gn[i] = G[i]; }
 
             for (i = 0; i < n; i++) {
-                int32_t ki = (int32_t)floor(t2[i] + 0.5);
+                int32_t ki = fpr_to_i32(floor(t2[i] + 0.5));
                 if (ki == 0) continue;
                 any = 1;
                 for (j = 0; j < n; j++) {

@@ -34,6 +34,19 @@
 #include "pqc/rand.h"
 #include "core/common/hash/sha3.h"
 
+/*
+ * Convert a double to int32_t with a defined result for every input.
+ * See the note on fpr_to_i32 in ntru_solve.c: an out-of-range or NaN
+ * float-to-integer conversion is undefined behaviour, and the recovered
+ * G can be far outside int32_t when the key is malformed.
+ */
+static inline int32_t fpr_to_i32(double x)
+{
+    if (!(x >= -2147483648.0)) return INT32_MIN;
+    if (x > 2147483647.0)      return INT32_MAX;
+    return (int32_t)x;
+}
+
 /* ------------------------------------------------------------------ */
 /* Hash-to-point: SHAKE-256 XOF -> polynomial in Z_q[x]/(x^n+1)        */
 /* ------------------------------------------------------------------ */
@@ -462,7 +475,7 @@ fndsa_sign(uint8_t *sig, size_t *siglen, size_t sig_max,
         fndsa_fft_inverse(G_fft, logn);
 
         for (i = 0; i < n; i++)
-            G[i] = (int32_t)floor(G_fft[i] + 0.5);
+            G[i] = fpr_to_i32(floor(G_fft[i] + 0.5));
     }
 
     /*

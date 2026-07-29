@@ -108,6 +108,13 @@ static void test_sig_buffer_bounds(void)
     }
 }
 
+/*
+ * The groups below call XMSS internals directly, so they are only built
+ * when XMSS is compiled in.  A minimal build with the algorithm disabled
+ * has no such symbols to link against.
+ */
+#ifdef PQC_TEST_XMSS_INTERNALS
+
 /* ------------------------------------------------------------------ */
 /* 2. XMSS: distinct leaves must derive distinct WOTS+ keys             */
 /* ------------------------------------------------------------------ */
@@ -147,6 +154,69 @@ static void test_xmss_wots_leaf_separation(void)
 
     check(all_distinct, "XMSS: WOTS+ public keys differ across leaf indices");
 }
+
+/* ------------------------------------------------------------------ */
+/* 2b. XMSS: WOTS+ must round-trip for every base-w digit pattern       */
+/*                                                                      */
+/* pk_from_sig(sign(m), m) must reproduce keygen()'s public key.  This  */
+/* is the invariant the whole scheme rests on, and it is sensitive to   */
+/* leftover address state: a chain whose digit is 0 performs no hash    */
+/* steps, so any field the hash function mutates but the caller does    */
+/* not reset makes signing and key generation disagree.  Many trials    */
+/* are needed because the failure depends on the message digits.        */
+/* ------------------------------------------------------------------ */
+
+static void test_xmss_wots_roundtrip(void)
+{
+    uint8_t sk_seed[PQC_XMSS_SHA2_N], pub_seed[PQC_XMSS_SHA2_N];
+    uint8_t msg[PQC_XMSS_SHA2_N];
+    static uint8_t pk_ref[PQC_XMSS_WOTS_LEN * PQC_XMSS_SHA2_N];
+    static uint8_t sig[PQC_XMSS_WOTS_LEN * PQC_XMSS_SHA2_N];
+    static uint8_t pk_chk[PQC_XMSS_WOTS_LEN * PQC_XMSS_SHA2_N];
+    uint8_t addr[PQC_XMSS_ADDR_BYTES];
+    const int trials = 400;
+    int trial, i, mismatches = 0, first_bad = -1;
+
+    printf("\n[2b] XMSS: WOTS+ sign/recover round-trip (%d trials)\n", trials);
+
+    for (trial = 0; trial < trials; trial++) {
+        for (i = 0; i < PQC_XMSS_SHA2_N; i++) {
+            sk_seed[i]  = (uint8_t)(i * 7 + trial);
+            pub_seed[i] = (uint8_t)(i * 3 + trial * 5);
+            /* Vary the digits, including zeros, across trials. */
+            msg[i]      = (uint8_t)(trial * 131 + i * 29);
+        }
+
+        xmss_addr_zero(addr);
+        xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_OTS);
+        xmss_addr_set_ots(addr, (uint32_t)trial);
+        xmss_wots_keygen(pk_ref, sk_seed, pub_seed, addr);
+
+        xmss_addr_zero(addr);
+        xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_OTS);
+        xmss_addr_set_ots(addr, (uint32_t)trial);
+        xmss_wots_sign(sig, msg, sk_seed, pub_seed, addr);
+
+        xmss_addr_zero(addr);
+        xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_OTS);
+        xmss_addr_set_ots(addr, (uint32_t)trial);
+        xmss_wots_pk_from_sig(pk_chk, sig, msg, pub_seed, addr);
+
+        if (memcmp(pk_ref, pk_chk, sizeof(pk_ref)) != 0) {
+            mismatches++;
+            if (first_bad < 0) first_bad = trial;
+        }
+    }
+
+    if (mismatches) {
+        printf("        %d/%d trials mismatched (first at trial %d)\n",
+               mismatches, trials, first_bad);
+    }
+    check(mismatches == 0,
+          "XMSS: WOTS+ recovered public key matches keygen for all digits");
+}
+
+#endif /* PQC_TEST_XMSS_INTERNALS */
 
 /* ------------------------------------------------------------------ */
 /* 4. XMSS: WOTS+ checksum must sign its top nibble                     */
@@ -201,6 +271,8 @@ static void test_xmss_checksum(void)
 /* 7. XMSS: per-node hash keys must not collapse                        */
 /* ------------------------------------------------------------------ */
 
+#ifdef PQC_TEST_XMSS_INTERNALS
+
 static void test_xmss_addr_fields(void)
 {
     uint8_t a[PQC_XMSS_ADDR_BYTES], b[PQC_XMSS_ADDR_BYTES];
@@ -232,6 +304,8 @@ static void test_xmss_addr_fields(void)
     check(memcmp(a, b, PQC_XMSS_ADDR_BYTES) != 0,
           "XMSS: distinct nodes at one height get distinct key addresses");
 }
+
+#endif /* PQC_TEST_XMSS_INTERNALS */
 
 /* ------------------------------------------------------------------ */
 /* 3. LMS / XMSS: sign must actually verify                             */
@@ -469,9 +543,12 @@ int main(int argc, char **argv)
 
     RUN("sizes",   test_declared_sizes);
     RUN("bounds",  test_sig_buffer_bounds);
+#ifdef PQC_TEST_XMSS_INTERNALS
     RUN("wots",    test_xmss_wots_leaf_separation);
-    RUN("checksum",test_xmss_checksum);
+    RUN("wotsrt",  test_xmss_wots_roundtrip);
     RUN("addr",    test_xmss_addr_fields);
+#endif
+    RUN("checksum",test_xmss_checksum);
     RUN("stateful",test_stateful_roundtrip);
     RUN("veriflen",test_verify_length_validation);
     RUN("kem",     test_kem_implicit_rejection);
