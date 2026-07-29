@@ -20,6 +20,7 @@
 
 #include "pqc/common.h"
 #include "pqc/algorithms.h"
+#include "pqc/hybrid.h"
 #include "pqc/rand.h"
 #include "core/kem/kem_internal.h"
 #include "core/kem/mlkem/mlkem.h"
@@ -353,4 +354,32 @@ int pqc_hybrid_kem_register(void)
     rc |= pqc_kem_add_vtable(&hybrid_mlkem768_x25519_vtable);
     rc |= pqc_kem_add_vtable(&hybrid_mlkem1024_p256_vtable);
     return rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public enumeration API (pqc/hybrid.h)                                */
+/*                                                                      */
+/* These are declared in the installed header, so every consumer that   */
+/* links against the library expects them to exist -- the Go binding    */
+/* failed to link without them.  Driven off the same vtable list as     */
+/* registration so the two cannot drift apart.                          */
+/* ------------------------------------------------------------------ */
+
+static const pqc_kem_vtable_t *const hybrid_kem_list[] = {
+    &hybrid_mlkem768_x25519_vtable,
+    &hybrid_mlkem1024_p256_vtable,
+};
+
+#define HYBRID_KEM_COUNT \
+    ((int)(sizeof(hybrid_kem_list) / sizeof(hybrid_kem_list[0])))
+
+int pqc_hybrid_kem_count(void)
+{
+    return HYBRID_KEM_COUNT;
+}
+
+const char *pqc_hybrid_kem_name(int index)
+{
+    if (index < 0 || index >= HYBRID_KEM_COUNT) return NULL;
+    return hybrid_kem_list[index]->algorithm_name;
 }

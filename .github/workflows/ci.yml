@@ -105,23 +105,40 @@ jobs:
         run: ctest --test-dir build --output-on-failure --timeout 600
 
   build-windows:
-    name: Windows (${{ matrix.generator }}, ${{ matrix.build_type }})
+    name: Windows (${{ matrix.label }}, ${{ matrix.build_type }})
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - generator: "Visual Studio 17 2022"
+          # An empty generator means "let CMake pick the newest Visual
+          # Studio on the runner". Pinning the generator string breaks
+          # every time GitHub rolls windows-latest to a new VS release --
+          # "Visual Studio 17 2022" stopped resolving when the image moved
+          # past VS 2022, and the job then failed at configure time with
+          # "could not find any instance of Visual Studio".
+          - generator: ""
+            label: MSVC
             build_type: Release
-          - generator: "Visual Studio 17 2022"
+          - generator: ""
+            label: MSVC
             build_type: Debug
           - generator: "MinGW Makefiles"
+            label: MinGW
             build_type: Release
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DPQC_BUILD_TESTS=ON
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.generator }}" ]; then
+            cmake -B build -G "${{ matrix.generator }}" \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DPQC_BUILD_TESTS=ON
+          else
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DPQC_BUILD_TESTS=ON
+          fi
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }}
       - name: Test
@@ -182,8 +199,14 @@ jobs:
       - name: Test
         run: |
           if [ "${{ matrix.sanitizer }}" = "memory" ]; then
-            # MSan makes SLH-DSA signature tests extremely slow; skip test_sig
-            ctest --test-dir build --output-on-failure --timeout 1800 --exclude-regex "test_sig"
+            # MSan with origins tracking is slow enough that the hash-heavy
+            # suites cannot finish: test_sig (SLH-DSA), test_security_audit
+            # (XMSS rebuilds a Merkle tree per signature, LMS builds 2^10
+            # leaves) and test_fndsa_quick (FN-DSA keygen). All three still
+            # run under ASan and UBSan above, so they are unchecked only by
+            # MSan. See the matching note in security.yml.
+            ctest --test-dir build --output-on-failure --timeout 1800 \
+              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick"
           else
             ctest --test-dir build --output-on-failure --timeout 1800
           fi
@@ -437,11 +460,21 @@ jobs:
           sudo cmake --install build
           sudo ldconfig
       - name: Build JNI
+        # javac -h only emits the headers. The JNI shared object still has
+        # to be compiled and placed somewhere the JVM will look, otherwise
+        # every test dies with
+        #   UnsatisfiedLinkError: no pqc_jni in java.library.path
         run: |
           cd bindings/java
           javac -h src/main/native src/main/java/com/dyber/pqc/*.java
+          cc -shared -fPIC -O2 \
+            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" \
+            -I src/main/native \
+            -I ../../include \
+            src/main/native/com_dyber_pqc_PQC.c \
+            -o libpqc_jni.so -lpqc
       - name: Test Java bindings
-        run: cd bindings/java && mvn test
+        run: cd bindings/java && mvn test -DargLine="-Djava.library.path=$PWD"
 
   binding-csharp:
     name: C# Binding

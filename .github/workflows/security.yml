@@ -131,12 +131,26 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=memory"
           cmake --build build
       - name: Run tests under MSan
-        # test_sig is excluded to match ci.yml: MSan reports uninitialised
-        # reads originating in the uninstrumented system libc, which this
-        # build cannot avoid without an instrumented toolchain.
+        # Exclusions, and why each one is here:
+        #
+        #   test_sig            - matches ci.yml. MSan reports uninitialised
+        #                         reads originating in the uninstrumented
+        #                         system libc, which this build cannot avoid
+        #                         without an instrumented toolchain.
+        #   test_security_audit - dominated by hash-heavy key generation
+        #                         (XMSS rebuilds a Merkle tree per signature,
+        #                         LMS builds 2^10 leaves). Under MSan with
+        #                         origins tracking this does not finish inside
+        #                         30 minutes.
+        #   test_fndsa_quick    - FN-DSA key generation, same problem.
+        #
+        # Both excluded suites still run under AddressSanitizer,
+        # UndefinedBehaviorSanitizer and Valgrind memcheck in this workflow,
+        # so the paths are not unchecked -- only unchecked *by MSan*.
         run: |
           ctest --test-dir build --output-on-failure \
-            --timeout ${{ env.CTEST_TIMEOUT }} --exclude-regex "test_sig"
+            --timeout ${{ env.CTEST_TIMEOUT }} \
+            --exclude-regex "test_sig|test_security_audit|test_fndsa_quick"
 
   # ============================================================
   # Valgrind Deep Analysis

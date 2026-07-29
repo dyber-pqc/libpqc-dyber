@@ -20,6 +20,7 @@
 
 #include "pqc/common.h"
 #include "pqc/algorithms.h"
+#include "pqc/hybrid.h"
 #include "core/sig/sig_internal.h"
 #include "core/sig/mldsa/mldsa.h"
 
@@ -239,4 +240,28 @@ int pqc_hybrid_sig_register(void)
     rc |= pqc_sig_add_vtable(&hybrid_mldsa65_ed25519_vtable);
     rc |= pqc_sig_add_vtable(&hybrid_mldsa87_p256_vtable);
     return rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public enumeration API (pqc/hybrid.h)                                */
+/* See the note in hybrid_kem.c.                                        */
+/* ------------------------------------------------------------------ */
+
+static const pqc_sig_vtable_t *const hybrid_sig_list[] = {
+    &hybrid_mldsa65_ed25519_vtable,
+    &hybrid_mldsa87_p256_vtable,
+};
+
+#define HYBRID_SIG_COUNT \
+    ((int)(sizeof(hybrid_sig_list) / sizeof(hybrid_sig_list[0])))
+
+int pqc_hybrid_sig_count(void)
+{
+    return HYBRID_SIG_COUNT;
+}
+
+const char *pqc_hybrid_sig_name(int index)
+{
+    if (index < 0 || index >= HYBRID_SIG_COUNT) return NULL;
+    return hybrid_sig_list[index]->algorithm_name;
 }
