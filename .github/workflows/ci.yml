@@ -218,15 +218,22 @@ jobs:
   valgrind:
     name: Valgrind Memory Check
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
       - name: Build
+        # -g -O1 rather than a full Debug (-O0) build. Valgrind is slow
+        # enough that unoptimised code pushed this job past its one-hour
+        # ceiling, where it was killed and reported as cancelled. -O1
+        # keeps symbols and accurate line numbers while running several
+        # times faster; the equivalent job in security.yml uses the same
+        # flags and completes in about 24 minutes.
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPQC_BUILD_TESTS=ON
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPQC_BUILD_TESTS=ON -DCMAKE_C_FLAGS="-g -O1"
           cmake --build build
       - name: Run tests under Valgrind
         run: |
@@ -248,18 +255,20 @@ jobs:
   constant-time:
     name: Constant-Time Verification
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
       - name: Build with CT instrumentation
+        # -O1 for the same reason as the Valgrind job above: at -O0 this
+        # exceeded the one-hour ceiling and was killed.
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
-            -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1"
+            -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1 -g -O1"
           cmake --build build
       - name: Run constant-time checks
         run: |
