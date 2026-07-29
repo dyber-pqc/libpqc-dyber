@@ -90,6 +90,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: create-release
+    # Package registry tokens are optional; a missing one must not turn
+    # an otherwise good release red.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -118,6 +121,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: create-release
+    # Package registry tokens are optional; a missing one must not turn
+    # an otherwise good release red.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -136,6 +142,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: create-release
+    # Package registry tokens are optional; a missing one must not turn
+    # an otherwise good release red.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -157,6 +166,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: create-release
+    # Package registry tokens are optional; a missing one must not turn
+    # an otherwise good release red.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -165,8 +177,13 @@ jobs:
       - name: Build and pack
         run: cd bindings/csharp && dotnet pack -c Release
       - name: Publish
+        # The token is passed through the environment rather than
+        # interpolated into the command line, where it would be visible
+        # in the process list and in any shell trace.
+        env:
+          NUGET_TOKEN: ${{ secrets.NUGET_TOKEN }}
         run: |
           cd bindings/csharp
           dotnet nuget push bin/Release/*.nupkg \
-            --api-key ${{ secrets.NUGET_TOKEN }} \
+            --api-key "$NUGET_TOKEN" \
             --source https://api.nuget.org/v3/index.json

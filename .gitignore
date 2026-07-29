@@ -77,3 +77,7 @@ docs/api/html/
 docs/api/latex/
 build-wsl/
 build-asan/
+
+# Local agent/editor settings (machine-specific paths, not for VCS)
+.claude/settings.local.json
+.claude/
