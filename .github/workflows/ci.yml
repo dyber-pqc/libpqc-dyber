@@ -54,29 +54,33 @@ jobs:
 
   build-linux-arm64:
     name: Linux ARM64
-    runs-on: ubuntu-latest
+    # Native ARM64 hardware. This previously ran aarch64 under QEMU via
+    # run-on-arch-action, where clang itself segfaulted partway through the
+    # build ("Segmentation fault (core dumped)" compiling sha2.c) -- an
+    # emulation failure, not a defect in the code. GitHub provides free
+    # ARM64 runners for public repositories, which removes the emulation
+    # layer and is far faster besides.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
-    # ARM64 under QEMU can hit GCC/assembler segfaults; treat as best-effort
+    # Still advisory until this has demonstrated a clean run on the new
+    # runner; flip to a required job once it has.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-      - name: Build and test in ARM64 container
-        uses: uraimo/run-on-arch-action@v2
-        with:
-          arch: aarch64
-          distro: ubuntu22.04
-          install: |
-            apt-get update -q
-            apt-get install -yq cmake ninja-build clang
-          run: |
-            export CC=clang CXX=clang++
-            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON -DPQC_ENABLE_ASM=OFF
-            cmake --build build
-            ctest --test-dir build --output-on-failure --timeout 600
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq cmake ninja-build clang
+      - name: Build and test
+        env:
+          CC: clang
+          CXX: clang++
+        # ASM stays off to keep this job testing exactly what it tested
+        # under emulation. Enabling the ARM assembly paths here is a
+        # separate change worth making on its own.
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DPQC_BUILD_TESTS=ON -DPQC_ENABLE_ASM=OFF
+          cmake --build build
+          ctest --test-dir build --output-on-failure --timeout 600
 
   build-macos:
     name: macOS (${{ matrix.arch }}, ${{ matrix.build_type }})
