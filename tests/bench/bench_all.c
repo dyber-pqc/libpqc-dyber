@@ -126,38 +126,25 @@ static void run_kem_benchmarks(void) {
             pqc_kem_decaps(kem, ss2, ct, sk);
         }
 
+        int kg_n = 0, en_n = 0, de_n = 0;
+
         /* Keygen */
-        for (int i = 0; i < iters; i++) {
-            uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-            pqc_kem_keygen(kem, pk, sk);
-            double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-            kg_s[i] = t1 - t0; kg_c[i] = c1 - c0;
-        }
+        BENCH_SERIES(kg_n, iters, kg_s, kg_c, pqc_kem_keygen(kem, pk, sk));
         pqc_kem_keygen(kem, pk, sk);
 
         /* Encaps */
-        for (int i = 0; i < iters; i++) {
-            uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-            pqc_kem_encaps(kem, ct, ss, pk);
-            double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-            en_s[i] = t1 - t0; en_c[i] = c1 - c0;
-        }
+        BENCH_SERIES(en_n, iters, en_s, en_c, pqc_kem_encaps(kem, ct, ss, pk));
         pqc_kem_encaps(kem, ct, ss, pk);
 
         /* Decaps */
-        for (int i = 0; i < iters; i++) {
-            uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-            pqc_kem_decaps(kem, ss2, ct, sk);
-            double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-            de_s[i] = t1 - t0; de_c[i] = c1 - c0;
-        }
+        BENCH_SERIES(de_n, iters, de_s, de_c, pqc_kem_decaps(kem, ss2, ct, sk));
 
         bench_result_t r;
-        bench_compute_stats(kg_s, iters, &r); bench_compute_cycles_median(kg_c, iters, &r);
+        bench_compute_stats(kg_s, kg_n, &r); bench_compute_cycles_median(kg_c, kg_n, &r);
         bench_emit_result(name, "keygen", &r, pk_size, sk_size, "ct", ct_size, "ss", ss_size);
-        bench_compute_stats(en_s, iters, &r); bench_compute_cycles_median(en_c, iters, &r);
+        bench_compute_stats(en_s, en_n, &r); bench_compute_cycles_median(en_c, en_n, &r);
         bench_emit_result(name, "encaps", &r, pk_size, sk_size, "ct", ct_size, "ss", ss_size);
-        bench_compute_stats(de_s, iters, &r); bench_compute_cycles_median(de_c, iters, &r);
+        bench_compute_stats(de_s, de_n, &r); bench_compute_cycles_median(de_c, de_n, &r);
         bench_emit_result(name, "decaps", &r, pk_size, sk_size, "ct", ct_size, "ss", ss_size);
 
         free(pk); free(sk); free(ct); free(ss); free(ss2);
@@ -222,15 +209,11 @@ static void run_sig_benchmarks(void) {
             if (pk && sk && s && c) {
                 for (int w = 0; w < BENCH_WARMUP_ITERATIONS && w < iters; w++)
                     pqc_sig_keygen(sig, pk, sk);
-                for (int i = 0; i < iters; i++) {
-                    uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-                    pqc_sig_keygen(sig, pk, sk);
-                    double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-                    s[i] = t1 - t0; c[i] = c1 - c0;
-                }
+                int kg_n = 0;
+                BENCH_SERIES(kg_n, iters, s, c, pqc_sig_keygen(sig, pk, sk));
                 bench_result_t r;
-                bench_compute_stats(s, iters, &r);
-                bench_compute_cycles_median(c, iters, &r);
+                bench_compute_stats(s, kg_n, &r);
+                bench_compute_cycles_median(c, kg_n, &r);
                 bench_emit_result(name, "keygen", &r, pk_size, sk_size,
                                   "max_sig", max_sig_size, NULL, 0);
             }
@@ -259,19 +242,17 @@ static void run_sig_benchmarks(void) {
             fill_test_msg(msg, msizes[m].size);
             pqc_sig_keygen(sig, pk, sk);
 
-            /* Sign */
-            for (int i = 0; i < iters; i++) {
-                if (is_stateful && i % 100 == 0)
-                    pqc_sig_keygen(sig, pk, sk);
-
-                uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-                if (is_stateful)
-                    pqc_sig_sign_stateful(sig, signature, &sig_len, msg, msizes[m].size, sk);
-                else
-                    pqc_sig_sign(sig, signature, &sig_len, msg, msizes[m].size, sk);
-                double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-                ss[i] = t1 - t0; sc[i] = c1 - c0;
-            }
+            /* Sign. Stateful schemes exhaust their key, so re-key
+             * periodically -- outside the timed region. */
+            int sg_n = 0, vf_n = 0;
+            BENCH_SERIES_PRE(sg_n, iters, ss, sc,
+                (is_stateful && BENCH_SERIES_I % 100 == 0)
+                    ? (void)pqc_sig_keygen(sig, pk, sk) : (void)0,
+                is_stateful
+                    ? pqc_sig_sign_stateful(sig, signature, &sig_len, msg,
+                                            msizes[m].size, sk)
+                    : pqc_sig_sign(sig, signature, &sig_len, msg,
+                                   msizes[m].size, sk));
 
             /* Prepare valid signature for verify */
             if (is_stateful) {
@@ -282,21 +263,17 @@ static void run_sig_benchmarks(void) {
             }
 
             /* Verify */
-            for (int i = 0; i < iters; i++) {
-                uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-                pqc_sig_verify(sig, msg, msizes[m].size, signature, sig_len, pk);
-                double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-                vs[i] = t1 - t0; vc[i] = c1 - c0;
-            }
+            BENCH_SERIES(vf_n, iters, vs, vc,
+                pqc_sig_verify(sig, msg, msizes[m].size, signature, sig_len, pk));
 
             bench_result_t r;
             char op[64];
             snprintf(op, sizeof(op), "sign(%s)", msizes[m].label);
-            bench_compute_stats(ss, iters, &r); bench_compute_cycles_median(sc, iters, &r);
+            bench_compute_stats(ss, sg_n, &r); bench_compute_cycles_median(sc, sg_n, &r);
             bench_emit_result(name, op, &r, pk_size, sk_size, "max_sig", max_sig_size, NULL, 0);
 
             snprintf(op, sizeof(op), "verify(%s)", msizes[m].label);
-            bench_compute_stats(vs, iters, &r); bench_compute_cycles_median(vc, iters, &r);
+            bench_compute_stats(vs, vf_n, &r); bench_compute_cycles_median(vc, vf_n, &r);
             bench_emit_result(name, op, &r, pk_size, sk_size, "max_sig", max_sig_size, NULL, 0);
 
             free(pk); free(sk); free(signature); free(msg);
@@ -346,16 +323,12 @@ static void bench_hash_generic(const char *name, hash_oneshot_fn fn,
         for (int w = 0; w < BENCH_WARMUP_ITERATIONS; w++)
             fn(out, buf, sz);
 
-        for (int i = 0; i < iters; i++) {
-            uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-            fn(out, buf, sz);
-            double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-            samp[i] = t1 - t0; cyc[i] = c1 - c0;
-        }
+        int n_run = 0;
+        BENCH_SERIES(n_run, iters, samp, cyc, fn(out, buf, sz));
 
         bench_result_t r;
-        bench_compute_stats(samp, iters, &r);
-        bench_compute_cycles_median(cyc, iters, &r);
+        bench_compute_stats(samp, n_run, &r);
+        bench_compute_cycles_median(cyc, n_run, &r);
 
         char op[64];
         snprintf(op, sizeof(op), "oneshot(%s)", sizes[si].l);
@@ -394,16 +367,12 @@ static void bench_xof_generic(const char *name, xof_oneshot_fn fn) {
         for (int w = 0; w < BENCH_WARMUP_ITERATIONS; w++)
             fn(out, sizeof(out), buf, sz);
 
-        for (int i = 0; i < iters; i++) {
-            uint64_t c0 = bench_rdtsc(); double t0 = bench_timer_ms();
-            fn(out, sizeof(out), buf, sz);
-            double t1 = bench_timer_ms(); uint64_t c1 = bench_rdtsc();
-            samp[i] = t1 - t0; cyc[i] = c1 - c0;
-        }
+        int n_run = 0;
+        BENCH_SERIES(n_run, iters, samp, cyc, fn(out, sizeof(out), buf, sz));
 
         bench_result_t r;
-        bench_compute_stats(samp, iters, &r);
-        bench_compute_cycles_median(cyc, iters, &r);
+        bench_compute_stats(samp, n_run, &r);
+        bench_compute_cycles_median(cyc, n_run, &r);
 
         char op[64];
         snprintf(op, sizeof(op), "oneshot(%s)", sizes[si].l);
