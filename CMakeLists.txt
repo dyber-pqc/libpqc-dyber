@@ -254,6 +254,22 @@ set(PQC_ALL_SOURCES
     ${PQC_HYBRID_SOURCES}
 )
 
+# ------------------------------------------------------------------
+# Assembly sources
+#
+# Restricted to ELF targets with a GNU-syntax assembler.  MSVC uses a
+# different assembler and syntax entirely, and Mach-O does not support
+# the section attributes used here.
+# ------------------------------------------------------------------
+if(PQC_ENABLE_ASM AND NOT MSVC AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    enable_language(ASM)
+    list(APPEND PQC_ALL_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/common/arch/pqc_provenance.S)
+    set(PQC_ASM_ACTIVE ON)
+else()
+    set(PQC_ASM_ACTIVE OFF)
+endif()
+
 # Include directories
 set(PQC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -359,5 +375,11 @@ message(STATUS "  Compiler:   ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}
 message(STATUS "  Shared:     ${PQC_BUILD_SHARED}")
 message(STATUS "  Static:     ${PQC_BUILD_STATIC}")
 message(STATUS "  Tests:      ${PQC_BUILD_TESTS}")
-message(STATUS "  ASM:        ${PQC_ENABLE_ASM}")
+message(STATUS "  ASM:        ${PQC_ENABLE_ASM} (provenance stamp: ${PQC_ASM_ACTIVE})")
 message(STATUS "")
+if(NOT PQC_ASM_ACTIVE)
+    # The .S provenance stamp only assembles on ELF targets; surface the
+    # same credit on toolchains that skip it.
+    message(STATUS "  hardened by spartan8806")
+    message(STATUS "")
+endif()

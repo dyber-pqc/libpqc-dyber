@@ -19,6 +19,7 @@ jobs:
   build-linux:
     name: Linux (${{ matrix.compiler }}, ${{ matrix.build_type }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +55,7 @@ jobs:
   build-linux-arm64:
     name: Linux ARM64
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # ARM64 under QEMU can hit GCC/assembler segfaults; treat as best-effort
     continue-on-error: true
     steps:
@@ -79,6 +81,7 @@ jobs:
   build-macos:
     name: macOS (${{ matrix.arch }}, ${{ matrix.build_type }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -104,6 +107,7 @@ jobs:
   build-windows:
     name: Windows (${{ matrix.generator }}, ${{ matrix.build_type }})
     runs-on: windows-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -126,6 +130,7 @@ jobs:
   build-freebsd:
     name: FreeBSD
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # FreeBSD VM is best-effort; package availability can vary
     continue-on-error: true
     steps:
@@ -147,6 +152,7 @@ jobs:
   sanitizers:
     name: Sanitizers (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Sanitizers may flag issues in algorithms under development; treat as advisory
     continue-on-error: true
     strategy:
@@ -185,6 +191,7 @@ jobs:
   valgrind:
     name: Valgrind Memory Check
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -214,6 +221,7 @@ jobs:
   constant-time:
     name: Constant-Time Verification
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -240,6 +248,7 @@ jobs:
   fuzzing:
     name: Fuzz Testing
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -260,6 +269,7 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -287,6 +297,7 @@ jobs:
   kat-validation:
     name: KAT Vector Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -308,6 +319,7 @@ jobs:
   benchmarks:
     name: Performance Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -329,6 +341,7 @@ jobs:
   binding-python:
     name: Python Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     strategy:
       matrix:
@@ -352,6 +365,7 @@ jobs:
   binding-rust:
     name: Rust Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -368,6 +382,7 @@ jobs:
   binding-go:
     name: Go Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -407,6 +422,7 @@ jobs:
   binding-java:
     name: Java Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -430,6 +446,7 @@ jobs:
   binding-csharp:
     name: C# Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -450,6 +467,7 @@ jobs:
   binding-node:
     name: JavaScript/TypeScript Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -473,6 +491,7 @@ jobs:
   binding-cpp:
     name: C++ Binding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -497,6 +516,7 @@ jobs:
   cli-test:
     name: CLI Tool Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
@@ -528,6 +548,7 @@ jobs:
   minimal-build:
     name: Minimal Build (core only)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -560,6 +581,7 @@ jobs:
   static-only-build:
     name: Static Library Only
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -577,6 +599,7 @@ jobs:
   no-asm-build:
     name: Pure C (No ASM)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
