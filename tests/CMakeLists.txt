@@ -43,8 +43,17 @@ target_link_libraries(test_security_audit PRIVATE pqc_static)
 target_include_directories(test_security_audit PRIVATE
     ${PQC_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+# The XMSS groups link against internal symbols, so they can only be
+# built when the algorithm is compiled in.
+if(PQC_ENABLE_SIG_XMSS)
+    target_compile_definitions(test_security_audit PRIVATE PQC_TEST_XMSS_INTERNALS=1)
+endif()
 add_test(NAME test_security_audit COMMAND test_security_audit)
-set_tests_properties(test_security_audit PROPERTIES TIMEOUT 600)
+# The stateful-signature groups rebuild a full Merkle tree per operation
+# (XMSS re-runs treehash on every signature), which is slow enough under
+# MemorySanitizer to exceed a 600 s budget. The work is inherent to what
+# is being asserted, so allow for it rather than reduce coverage.
+set_tests_properties(test_security_audit PROPERTIES TIMEOUT 1800)
 
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)

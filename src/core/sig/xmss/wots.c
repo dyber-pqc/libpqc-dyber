@@ -154,6 +154,16 @@ void xmss_wots_keygen(uint8_t *pk, const uint8_t *seed,
     for (i = 0; i < LEN; i++) {
         xmss_addr_set_chain(addr, (uint32_t)i);
         xmss_addr_set_hash(addr, 0);
+        /*
+         * Reset keyAndMask before deriving the chain secret.  xmss_hash_f
+         * leaves it at 1, and a chain whose base-w digit is 0 performs no
+         * hash steps at all -- so without this reset the address fed to
+         * the PRF depends on how many steps the *previous* chain took,
+         * which differs between key generation (always w-1 steps) and
+         * signing (digit-many steps).  That makes the derived secret, and
+         * hence the chain, disagree between the two.
+         */
+        xmss_addr_set_key_and_mask(addr, 0);
 
         /* Derive chain secret key: sk[i] = PRF(seed, addr) */
         xmss_prf(sk_chain, seed, addr);
@@ -184,6 +194,8 @@ void xmss_wots_sign(uint8_t *sig, const uint8_t *msg,
     for (i = 0; i < LEN; i++) {
         xmss_addr_set_chain(addr, (uint32_t)i);
         xmss_addr_set_hash(addr, 0);
+        /* See the note in xmss_wots_keygen. */
+        xmss_addr_set_key_and_mask(addr, 0);
 
         xmss_prf(sk_chain, seed, addr);
         xmss_chain(sig + (size_t)i * N, sk_chain, 0, basew[i], pub_seed, addr);

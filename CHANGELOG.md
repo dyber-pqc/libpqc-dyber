@@ -5,6 +5,41 @@ All notable changes to libpqc-dyber will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **XMSS: signatures intermittently failed to verify.** `xmss_hash_f`
+  leaves the `keyAndMask` address field set, and a WOTS+ chain whose
+  base-w digit is zero performs no hash steps at all — so the address fed
+  to the next chain's secret-key PRF depended on how many steps the
+  previous chain took, which differs between key generation (always w-1
+  steps) and signing (digit-many steps). Affected chains derived
+  different secrets in the two paths. This surfaced only once the
+  `keyAndMask` fix in 0.2.0 made that field significant; before then it
+  was masked by every node sharing one key. Reproduced at roughly 1 run
+  in 12, and on every platform.
+- **FN-DSA: undefined behaviour converting out-of-range doubles to
+  `int32_t`** in `ntru_solve.c` and `sign.c`. The NTRU solver can diverge
+  and produce magnitudes around 1e15; an out-of-range or NaN
+  float-to-integer conversion is undefined, not wrapping. Conversions are
+  now clamped, leaving the caller's own correctness checks to reject the
+  result. Caught by the UndefinedBehaviorSanitizer job.
+
+### Added
+
+- `test_security_audit` now asserts the WOTS+ round-trip invariant
+  (`pk_from_sig(sign(m), m) == keygen()`) over many digit patterns, which
+  is what caught the defect above.
+
+### Fixed
+
+- `test_security_audit` no longer fails to link in minimal builds; the
+  groups that call XMSS internals are compiled only when XMSS is enabled.
+- Raised the regression suite's timeout to 1800 s. Rebuilding a Merkle
+  tree per signature is inherent to what it asserts, and that exceeds a
+  600 s budget under MemorySanitizer.
+
 ## [0.2.0] - 2026-07-29
 
 This is a security release. It fixes four critical memory-safety defects,
