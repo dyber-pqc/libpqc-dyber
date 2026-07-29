@@ -36,25 +36,33 @@
 static const ntru_params_t params_hps2048509 = {
     .n = 509, .q = 2048, .log_q = 11, .is_hrss = 0,
     .weight = 169,
-    .pk_bytes = 700, .sk_bytes = 968, .ct_bytes = 700
+    .pk_bytes = NTRU_HPS2048509_PK_BYTES,
+    .sk_bytes = NTRU_HPS2048509_SK_BYTES,
+    .ct_bytes = NTRU_HPS2048509_CT_BYTES
 };
 
 static const ntru_params_t params_hps2048677 = {
     .n = 677, .q = 2048, .log_q = 11, .is_hrss = 0,
     .weight = 225,
-    .pk_bytes = 931, .sk_bytes = 1267, .ct_bytes = 931
+    .pk_bytes = NTRU_HPS2048677_PK_BYTES,
+    .sk_bytes = NTRU_HPS2048677_SK_BYTES,
+    .ct_bytes = NTRU_HPS2048677_CT_BYTES
 };
 
 static const ntru_params_t params_hps4096821 = {
     .n = 821, .q = 4096, .log_q = 12, .is_hrss = 0,
     .weight = 273,
-    .pk_bytes = 1232, .sk_bytes = 1626, .ct_bytes = 1232
+    .pk_bytes = NTRU_HPS4096821_PK_BYTES,
+    .sk_bytes = NTRU_HPS4096821_SK_BYTES,
+    .ct_bytes = NTRU_HPS4096821_CT_BYTES
 };
 
 static const ntru_params_t params_hrss701 = {
     .n = 701, .q = 8192, .log_q = 13, .is_hrss = 1,
     .weight = 0,
-    .pk_bytes = 1140, .sk_bytes = 1486, .ct_bytes = 1140
+    .pk_bytes = NTRU_HRSS701_PK_BYTES,
+    .sk_bytes = NTRU_HRSS701_SK_BYTES,
+    .ct_bytes = NTRU_HRSS701_CT_BYTES
 };
 
 /* ------------------------------------------------------------------ */
@@ -314,9 +322,9 @@ static const pqc_kem_vtable_t ntru_hps2048509_vtable = {
     .algorithm_name    = PQC_KEM_NTRU_HPS_2048_509,
     .security_level    = PQC_SECURITY_LEVEL_1,
     .nist_standard     = "NTRU",
-    .public_key_size   = 699,
-    .secret_key_size   = 935,
-    .ciphertext_size   = 699,
+    .public_key_size   = NTRU_HPS2048509_PK_BYTES,
+    .secret_key_size   = NTRU_HPS2048509_SK_BYTES,
+    .ciphertext_size   = NTRU_HPS2048509_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = ntru_hps2048509_keygen,
     .encaps = ntru_hps2048509_encaps,
@@ -327,9 +335,9 @@ static const pqc_kem_vtable_t ntru_hps2048677_vtable = {
     .algorithm_name    = PQC_KEM_NTRU_HPS_2048_677,
     .security_level    = PQC_SECURITY_LEVEL_3,
     .nist_standard     = "NTRU",
-    .public_key_size   = 930,
-    .secret_key_size   = 1234,
-    .ciphertext_size   = 930,
+    .public_key_size   = NTRU_HPS2048677_PK_BYTES,
+    .secret_key_size   = NTRU_HPS2048677_SK_BYTES,
+    .ciphertext_size   = NTRU_HPS2048677_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = ntru_hps2048677_keygen,
     .encaps = ntru_hps2048677_encaps,
@@ -340,9 +348,9 @@ static const pqc_kem_vtable_t ntru_hps4096821_vtable = {
     .algorithm_name    = PQC_KEM_NTRU_HPS_4096_821,
     .security_level    = PQC_SECURITY_LEVEL_5,
     .nist_standard     = "NTRU",
-    .public_key_size   = 1230,
-    .secret_key_size   = 1590,
-    .ciphertext_size   = 1230,
+    .public_key_size   = NTRU_HPS4096821_PK_BYTES,
+    .secret_key_size   = NTRU_HPS4096821_SK_BYTES,
+    .ciphertext_size   = NTRU_HPS4096821_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = ntru_hps4096821_keygen,
     .encaps = ntru_hps4096821_encaps,
@@ -353,9 +361,9 @@ static const pqc_kem_vtable_t ntru_hrss701_vtable = {
     .algorithm_name    = PQC_KEM_NTRU_HRSS_701,
     .security_level    = PQC_SECURITY_LEVEL_3,
     .nist_standard     = "NTRU",
-    .public_key_size   = 1138,
-    .secret_key_size   = 1450,
-    .ciphertext_size   = 1138,
+    .public_key_size   = NTRU_HRSS701_PK_BYTES,
+    .secret_key_size   = NTRU_HRSS701_SK_BYTES,
+    .ciphertext_size   = NTRU_HRSS701_CT_BYTES,
     .shared_secret_size = 32,
     .keygen = ntru_hrss701_keygen,
     .encaps = ntru_hrss701_encaps,

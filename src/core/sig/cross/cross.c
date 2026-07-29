@@ -121,6 +121,18 @@ static int next_pow2(int v)
     return p;
 }
 
+/*
+ * Bounds guard for the signature serialiser and parser.
+ *
+ * The amount written per signature depends on the per-signature
+ * challenge hash, so `pos` cannot be reasoned about statically.  Every
+ * write and every read must be checked against the buffer length --
+ * without this, sign() overflows the caller's buffer and verify()
+ * reads past the end of an attacker-supplied one.
+ */
+#define CROSS_ROOM(pos, need, limit) \
+    ((pos) <= (limit) && (size_t)(need) <= (limit) - (pos))
+
 /* Derive challenge bits from hash */
 static void cross_derive_challenges(uint8_t *challenges, int t,
                                      const uint8_t *hash, int hash_len)
@@ -228,6 +240,8 @@ static pqc_status_t cross_sign_impl(uint8_t *sig, size_t *siglen,
     uint8_t challenges[PQC_CROSS_MAX_T];
     int num_leaves;
     size_t pos;
+    size_t sig_max = params->sig_len;
+    int overflow = 0;
     int i;
     pqc_status_t rc;
 
@@ -295,12 +309,20 @@ static pqc_status_t cross_sign_impl(uint8_t *sig, size_t *siglen,
      * [seed_tree_path] [per-round responses for unopened rounds]
      */
     pos = 0;
+    if (!CROSS_ROOM(pos, 16 + (size_t)hash_len, sig_max)) {
+        rc = PQC_ERROR_INTERNAL;
+        goto cleanup;
+    }
     memcpy(sig + pos, salt, 16); pos += 16;
     memcpy(sig + pos, tree, (size_t)hash_len); pos += (size_t)hash_len;
 
     /* Challenge bits */
     {
         size_t chal_bytes = ((size_t)t + 7) / 8;
+        if (!CROSS_ROOM(pos, chal_bytes, sig_max)) {
+            rc = PQC_ERROR_INTERNAL;
+            goto cleanup;
+        }
         memset(sig + pos, 0, chal_bytes);
         for (i = 0; i < t; i++) {
             if (challenges[i]) {
@@ -327,14 +349,24 @@ static pqc_status_t cross_sign_impl(uint8_t *sig, size_t *siglen,
                                      num_leaves, reveal_set, reveal_count, seed_len);
 
             /* Write path_len (2 bytes) + path seeds */
-            sig[pos++] = (uint8_t)(path_len >> 8);
-            sig[pos++] = (uint8_t)(path_len & 0xFF);
-            memcpy(sig + pos, path_buf, (size_t)path_len * (size_t)seed_len);
-            pos += (size_t)path_len * (size_t)seed_len;
+            if (CROSS_ROOM(pos, 2 + (size_t)path_len * (size_t)seed_len,
+                           sig_max)) {
+                sig[pos++] = (uint8_t)(path_len >> 8);
+                sig[pos++] = (uint8_t)(path_len & 0xFF);
+                memcpy(sig + pos, path_buf, (size_t)path_len * (size_t)seed_len);
+                pos += (size_t)path_len * (size_t)seed_len;
+            } else {
+                overflow = 1;
+            }
         }
 
         if (reveal_set) pqc_free(reveal_set, (size_t)t * sizeof(int));
         if (path_buf) pqc_free(path_buf, (size_t)num_leaves * (size_t)seed_len);
+
+        if (overflow) {
+            rc = PQC_ERROR_INTERNAL;
+            goto cleanup;
+        }
     }
 
     /* For challenged rounds (challenges[i] == 1), emit Merkle auth path + response hash */
@@ -344,6 +376,14 @@ static pqc_status_t cross_sign_impl(uint8_t *sig, size_t *siglen,
             int auth_len = 0;
 
             cross_merkle_path(auth_path, &auth_len, tree, i, num_leaves, hash_len);
+
+            if (!CROSS_ROOM(pos,
+                            1 + (size_t)auth_len * (size_t)hash_len
+                              + (size_t)hash_len,
+                            sig_max)) {
+                rc = PQC_ERROR_INTERNAL;
+                goto cleanup;
+            }
 
             sig[pos++] = (uint8_t)auth_len;
             memcpy(sig + pos, auth_path, (size_t)auth_len * (size_t)hash_len);
@@ -401,15 +441,28 @@ static pqc_status_t cross_verify_impl(const uint8_t *msg, size_t msglen,
     size_t pos;
     int i;
 
-    (void)siglen;
+    /*
+     * siglen is attacker-controlled.  Every field below is read at a
+     * cumulative offset that depends on the signature's own contents,
+     * so each read must be bounds-checked against it.
+     */
+    if (siglen > params->sig_len) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
 
     pos = 0;
+    if (!CROSS_ROOM(pos, 16 + (size_t)hash_len, siglen)) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
     salt = sig + pos; pos += 16;
     merkle_root = sig + pos; pos += (size_t)hash_len;
 
     /* Read challenge bits */
     {
         size_t chal_bytes = ((size_t)t + 7) / 8;
+        if (!CROSS_ROOM(pos, chal_bytes, siglen)) {
+            return PQC_ERROR_VERIFICATION_FAILED;
+        }
         for (i = 0; i < t; i++) {
             challenges[i] = (sig[pos + i / 8] >> (i % 8)) & 1;
         }
@@ -435,8 +488,18 @@ static pqc_status_t cross_verify_impl(const uint8_t *msg, size_t msglen,
 
     /* Read and verify seed tree path for opened rounds */
     {
-        int path_len = ((int)sig[pos] << 8) | sig[pos + 1];
+        int path_len;
+
+        if (!CROSS_ROOM(pos, 2, siglen)) {
+            return PQC_ERROR_VERIFICATION_FAILED;
+        }
+        path_len = ((int)sig[pos] << 8) | sig[pos + 1];
         pos += 2;
+
+        if (path_len < 0 || path_len > num_leaves ||
+            !CROSS_ROOM(pos, (size_t)path_len * (size_t)seed_len, siglen)) {
+            return PQC_ERROR_VERIFICATION_FAILED;
+        }
 
         int *reveal_set = (int *)pqc_calloc((size_t)t, sizeof(int));
         int reveal_count = 0;
@@ -497,11 +560,25 @@ static pqc_status_t cross_verify_impl(const uint8_t *msg, size_t msglen,
     /* Verify challenged rounds */
     for (i = 0; i < t; i++) {
         if (challenges[i] == 1) {
-            int auth_len = (int)sig[pos++];
-            const uint8_t *auth_path = sig + pos;
+            int auth_len;
+            const uint8_t *auth_path;
+            const uint8_t *response_hash;
+
+            if (!CROSS_ROOM(pos, 1, siglen)) {
+                return PQC_ERROR_VERIFICATION_FAILED;
+            }
+            auth_len = (int)sig[pos++];
+
+            if (!CROSS_ROOM(pos,
+                            (size_t)auth_len * (size_t)hash_len
+                              + (size_t)hash_len,
+                            siglen)) {
+                return PQC_ERROR_VERIFICATION_FAILED;
+            }
+            auth_path = sig + pos;
             pos += (size_t)auth_len * (size_t)hash_len;
 
-            const uint8_t *response_hash = sig + pos;
+            response_hash = sig + pos;
             pos += (size_t)hash_len;
 
             /* Recompute the leaf commitment from the response */

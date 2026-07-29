@@ -73,9 +73,9 @@ void bike_sample_error(uint64_t *e0, uint64_t *e1,
 /* Core KEM operations                                                  */
 /* ------------------------------------------------------------------ */
 
-void bike_keygen_internal(uint8_t *pk, uint8_t *sk,
+int  bike_keygen_internal(uint8_t *pk, uint8_t *sk,
                           const bike_params_t *params);
-void bike_encaps_internal(uint8_t *ct, uint8_t *ss,
+int  bike_encaps_internal(uint8_t *ct, uint8_t *ss,
                           const uint8_t *pk,
                           const bike_params_t *params);
 int  bike_decaps_internal(uint8_t *ss, const uint8_t *ct,

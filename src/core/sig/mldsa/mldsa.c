@@ -198,8 +198,12 @@ pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
     pqc_shake256_squeeze(&state, mu, PQC_MLDSA_CRHBYTES);
 
     /* Compute rhoprime = CRH(key, rnd, mu)
-     * Use hedged signing: rnd is random */
-    pqc_randombytes(rnd, PQC_MLDSA_SEEDBYTES);
+     * Use hedged signing: rnd is random.  On RNG failure rnd would be
+     * stack residue, silently degrading the hedge -- fail instead. */
+    if (pqc_randombytes(rnd, PQC_MLDSA_SEEDBYTES) != PQC_OK) {
+        pqc_memzero(rnd, PQC_MLDSA_SEEDBYTES);
+        return PQC_ERROR_RNG_FAILED;
+    }
 
     pqc_shake256_init(&state);
     pqc_shake256_absorb(&state, key, PQC_MLDSA_SEEDBYTES);

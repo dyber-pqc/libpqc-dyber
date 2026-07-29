@@ -92,9 +92,9 @@ void hqc_vect_add(uint64_t *o, const uint64_t *a, const uint64_t *b,
 /* Core KEM operations                                                  */
 /* ------------------------------------------------------------------ */
 
-void hqc_keygen_internal(uint8_t *pk, uint8_t *sk,
+int  hqc_keygen_internal(uint8_t *pk, uint8_t *sk,
                          const hqc_params_t *params);
-void hqc_encaps_internal(uint8_t *ct, uint8_t *ss,
+int  hqc_encaps_internal(uint8_t *ct, uint8_t *ss,
                          const uint8_t *pk,
                          const hqc_params_t *params);
 int  hqc_decaps_internal(uint8_t *ss, const uint8_t *ct,

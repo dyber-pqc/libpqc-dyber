@@ -86,11 +86,19 @@ static void xmss_hash_h(uint8_t *out, const uint8_t *left,
     uint8_t tmp[2 * N];
     int i;
 
-    xmss_addr_set_hash(addr, 0);
+    /*
+     * Vary the keyAndMask selector (word 7, offset 28) -- NOT the hash
+     * address at offset 24, which aliases the tree index the caller has
+     * set.  Using offset 24 here would collapse the key and both
+     * bitmasks to a single pair per tree level instead of one per node,
+     * which is what carries XMSS's multi-target second-preimage
+     * argument.
+     */
+    xmss_addr_set_key_and_mask(addr, 0);
     xmss_prf_keygen(key, pub_seed, addr);
-    xmss_addr_set_hash(addr, 1);
+    xmss_addr_set_key_and_mask(addr, 1);
     xmss_prf_keygen(bm0, pub_seed, addr);
-    xmss_addr_set_hash(addr, 2);
+    xmss_addr_set_key_and_mask(addr, 2);
     xmss_prf_keygen(bm1, pub_seed, addr);
 
     for (i = 0; i < N; i++) {
@@ -121,9 +129,18 @@ static void xmss_ltree(uint8_t *out, const uint8_t *wots_pk,
     int parent;
     uint32_t height = 0;
     int i;
+    uint32_t leaf_idx;
 
     memcpy(buf, wots_pk, (size_t)LEN * N);
+
+    /*
+     * Setting the type zeroes offsets 16..31, so capture the leaf index
+     * the caller established and restore it as the L-tree address.
+     * Otherwise every leaf's L-tree runs under an identical address.
+     */
+    leaf_idx = xmss_addr_get_ots(addr);
     xmss_addr_set_type(addr, PQC_XMSS_ADDR_TYPE_LTREE);
+    xmss_addr_set_ltree(addr, leaf_idx);
 
     while (num_nodes > 1) {
         xmss_addr_set_tree_height(addr, height);
@@ -373,8 +390,17 @@ static pqc_status_t xmss_verify_impl(const uint8_t *msg, size_t msglen,
     uint8_t node[N];
     uint8_t addr[PQC_XMSS_ADDR_BYTES];
     int level;
+    size_t expected;
 
-    (void)siglen;
+    /*
+     * The signature length is attacker-controlled.  Validate it before
+     * reading any of the fixed-offset fields below, otherwise a short
+     * buffer is read far past its end.
+     */
+    expected = 4 + (size_t)N + (size_t)LEN * N + (size_t)h * N;
+    if (siglen != expected) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
 
     /* Parse signature */
     idx = xmss_load_u32(sig);

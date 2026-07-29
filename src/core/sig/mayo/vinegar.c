@@ -24,8 +24,8 @@
 /* salt_len: length of salt (0 if unused).                              */
 /* ------------------------------------------------------------------ */
 
-void mayo_sample_vinegar(uint8_t *v_vals, int v_count,
-                         const uint8_t *salt, size_t salt_len)
+int mayo_sample_vinegar(uint8_t *v_vals, int v_count,
+                        const uint8_t *salt, size_t salt_len)
 {
     size_t packed_len = ((size_t)v_count + 1) / 2;
     uint8_t buf[256];
@@ -34,8 +34,15 @@ void mayo_sample_vinegar(uint8_t *v_vals, int v_count,
     (void)salt;
     (void)salt_len;
 
-    /* Generate random bytes, then unpack to GF(16) elements */
-    pqc_randombytes(buf, packed_len);
+    /*
+     * Generate random bytes, then unpack to GF(16) elements.  On RNG
+     * failure buf is untouched, so the vinegar values would come from
+     * stack residue -- report the failure instead.
+     */
+    if (pqc_randombytes(buf, packed_len) != PQC_OK) {
+        pqc_memzero(buf, sizeof(buf));
+        return -1;
+    }
 
     for (i = 0; i < v_count; i++) {
         if (i % 2 == 0) {
@@ -46,6 +53,7 @@ void mayo_sample_vinegar(uint8_t *v_vals, int v_count,
     }
 
     pqc_memzero(buf, sizeof(buf));
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */

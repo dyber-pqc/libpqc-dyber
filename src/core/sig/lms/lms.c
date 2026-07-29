@@ -72,7 +72,10 @@ static pqc_status_t lms_keygen_impl(uint8_t *pk, uint8_t *sk, int h,
 
     /* Compute Merkle root */
     uint8_t root[N];
-    hss_compute_root(root, I, seed, h);
+    if (hss_compute_root(root, I, seed, h) != 0) {
+        pqc_memzero(seed, N);
+        return PQC_ERROR_NOT_SUPPORTED;
+    }
 
     /* Build public key */
     lms_store_u32(pk + 0, lms_type);
@@ -82,75 +85,6 @@ static pqc_status_t lms_keygen_impl(uint8_t *pk, uint8_t *sk, int h,
 
     pqc_memzero(seed, N);
     return PQC_OK;
-}
-
-/* ------------------------------------------------------------------ */
-/* Compute authentication path for leaf q.                              */
-/* Uses level-by-level recomputation.                                   */
-/* ------------------------------------------------------------------ */
-
-static void lms_compute_auth_path(uint8_t *path, const uint8_t *I,
-                                   const uint8_t *seed, int h, uint32_t q)
-{
-    /*
-     * For each level l from 0 to h-1, the sibling of q's ancestor
-     * at level l is needed.  We compute it by hashing the appropriate
-     * subtree.  For simplicity in this implementation, we derive
-     * each needed node from the leaf level.
-     */
-    uint32_t num_leaves = (uint32_t)1 << h;
-    int level;
-    uint32_t node_idx = q;
-
-    for (level = 0; level < h; level++) {
-        /* Sibling of node_idx at this level */
-        uint32_t sibling = node_idx ^ 1;
-        uint8_t sibling_hash[N];
-
-        if (level == 0) {
-            /* Leaf level: compute OTS public key for sibling */
-            uint8_t leaf_seed[N];
-            uint8_t ots_pk[N];
-            uint8_t buf[4];
-            pqc_sha256_ctx ctx;
-
-            pqc_sha256_init(&ctx);
-            pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
-            lms_store_u32(buf, sibling);
-            pqc_sha256_update(&ctx, buf, 4);
-            pqc_sha256_update(&ctx, seed, N);
-            pqc_sha256_final(&ctx, leaf_seed);
-
-            lmots_keygen(ots_pk, I, sibling, leaf_seed);
-
-            pqc_sha256_init(&ctx);
-            pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
-            lms_store_u32(buf, num_leaves + sibling);
-            pqc_sha256_update(&ctx, buf, 4);
-            buf[0] = 0x82; buf[1] = 0x82;
-            pqc_sha256_update(&ctx, buf, 2);
-            pqc_sha256_update(&ctx, ots_pk, N);
-            pqc_sha256_final(&ctx, sibling_hash);
-        } else {
-            /*
-             * Internal node: for simplicity, derive from seed.
-             * A production implementation would cache or use BDS.
-             */
-            pqc_sha256_ctx ctx;
-            uint8_t buf[4];
-            pqc_sha256_init(&ctx);
-            pqc_sha256_update(&ctx, I, PQC_LMS_I_LEN);
-            lms_store_u32(buf, ((uint32_t)1 << (h - level)) + sibling);
-            pqc_sha256_update(&ctx, buf, 4);
-            pqc_sha256_update(&ctx, seed, N);
-            lms_store_u32(buf, (uint32_t)level);
-            pqc_sha256_update(&ctx, buf, 4);
-            pqc_sha256_final(&ctx, sibling_hash);
-        }
-
-        memcpy(path + (size_t)level * N, sibling_hash, N);
-        node_idx >>= 1;
-    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -201,8 +135,13 @@ static pqc_status_t lms_sign_stateful_impl(uint8_t *sig, size_t *siglen,
     lms_store_u32(sig + pos, lms_type);
     pos += 4;
 
-    /* Authentication path (h * N bytes) */
-    lms_compute_auth_path(sig + pos, I, seed, h, q);
+    /*
+     * Authentication path (h * N bytes), taken from the real Merkle
+     * tree.  This must be the same tree the public key commits to.
+     */
+    if (hss_compute_root_and_path(NULL, sig + pos, I, seed, h, q) != 0) {
+        return PQC_ERROR_NOT_SUPPORTED;
+    }
     pos += (size_t)h * N;
 
     *siglen = pos;
@@ -230,8 +169,17 @@ static pqc_status_t lms_verify_impl(const uint8_t *msg, size_t msglen,
     uint32_t num_leaves = (uint32_t)1 << h;
     int level;
     uint32_t node_num;
+    size_t expected;
 
-    (void)siglen;
+    /*
+     * The signature length is attacker-controlled.  Validate it before
+     * reading any of the fixed-offset fields below, otherwise a short
+     * buffer is read far past its end.
+     */
+    expected = 4 + (size_t)PQC_LMOTS_SIGBYTES + 4 + (size_t)h * N;
+    if (siglen != expected) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
 
     /* Parse q */
     q = lms_load_u32(sig + pos);
@@ -278,12 +226,17 @@ static pqc_status_t lms_verify_impl(const uint8_t *msg, size_t msglen,
         buf[0] = 0x83; buf[1] = 0x83;
         pqc_sha256_update(&ctx, buf, 2);
 
+        /*
+         * In heap numbering node 2k is the LEFT child of k, so an even
+         * node_num means our node is the left operand and the sibling
+         * is the right one (RFC 8554 Algorithm 6).
+         */
         if (node_num % 2 == 0) {
-            pqc_sha256_update(&ctx, sibling, N);
             pqc_sha256_update(&ctx, node_hash, N);
+            pqc_sha256_update(&ctx, sibling, N);
         } else {
-            pqc_sha256_update(&ctx, node_hash, N);
             pqc_sha256_update(&ctx, sibling, N);
+            pqc_sha256_update(&ctx, node_hash, N);
         }
         pqc_sha256_final(&ctx, parent_hash);
         memcpy(node_hash, parent_hash, N);

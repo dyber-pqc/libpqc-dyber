@@ -32,6 +32,8 @@ void xmss_addr_set_hash(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t hash);
 void xmss_addr_set_ltree(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t ltree);
 void xmss_addr_set_tree_height(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t h);
 void xmss_addr_set_tree_index(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t idx);
+void xmss_addr_set_key_and_mask(uint8_t addr[PQC_XMSS_ADDR_BYTES], uint32_t kam);
+uint32_t xmss_addr_get_ots(const uint8_t addr[PQC_XMSS_ADDR_BYTES]);
 
 /* ------------------------------------------------------------------ */
 /* WOTS+ operations (wots.c)                                            */

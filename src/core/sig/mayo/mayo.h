@@ -67,7 +67,7 @@ void mayo_compute_oil_space(uint8_t *oil, const uint8_t *sk_seed,
 /* Vinegar variable operations (vinegar.c)                              */
 /* ------------------------------------------------------------------ */
 
-void mayo_sample_vinegar(uint8_t *v_vals, int v_count,
+int  mayo_sample_vinegar(uint8_t *v_vals, int v_count,
                          const uint8_t *salt, size_t salt_len);
 void mayo_vinegar_substitute(uint8_t *target, const uint8_t *P,
                              const uint8_t *v_vals,

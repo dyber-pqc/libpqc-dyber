@@ -286,7 +286,10 @@ static pqc_status_t mayo_sign_impl(uint8_t *sig, size_t *siglen,
             uint8_t *v_copy = vin_vals + copy * v;
             uint8_t lin_sys[PQC_MAYO_MAX_M * (PQC_MAYO_MAX_O + 1)];
 
-            mayo_sample_vinegar(v_copy, v, salt, 16);
+            if (mayo_sample_vinegar(v_copy, v, salt, 16) != 0) {
+                rc = PQC_ERROR_RNG_FAILED;
+                goto cleanup;
+            }
             mayo_vinegar_substitute(lin_sys, P, v_copy, params);
 
             /* Accumulate into the augmented matrix */
@@ -394,7 +397,10 @@ static pqc_status_t mayo_verify_impl(const uint8_t *msg, size_t msglen,
     int copy, i;
     pqc_status_t rc;
 
-    (void)siglen;
+    /* siglen is attacker-controlled; validate before reading below. */
+    if (siglen != params->sig_len) {
+        return PQC_ERROR_VERIFICATION_FAILED;
+    }
 
     salt = sig;
     packed = sig + 16;
