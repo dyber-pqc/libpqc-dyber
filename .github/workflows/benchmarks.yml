@@ -127,19 +127,24 @@ jobs:
 
       # ---- Run benchmarks ----
 
+      # Run the suite ONCE.
+      #
+      # This previously invoked bench_all three times -- once for CSV, once
+      # for JSON, once for a human-readable table -- and each invocation is
+      # a full sweep of every algorithm. That tripled the cost for no gain:
+      # the only consumer of any of it is the CSV, which both
+      # regression-check and store-history read. The JSON artifact was
+      # uploaded and never read by any job.
+      #
+      # bench_all takes a single output format per run, so the table for the
+      # log comes from printing the CSV rather than re-measuring everything.
       - name: Run full benchmark suite (CSV)
         run: |
           ./build/tests/bench_all --csv --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.csv
         shell: bash
 
-      - name: Run full benchmark suite (JSON)
-        run: |
-          ./build/tests/bench_all --json --iterations ${{ env.BENCHMARK_ITERATIONS }} --output bench_results.json
-        shell: bash
-
-      - name: Run full benchmark suite (Table for logs)
-        run: |
-          ./build/tests/bench_all --iterations ${{ env.BENCHMARK_ITERATIONS }}
+      - name: Show results in the log
+        run: cat bench_results.csv
         shell: bash
 
       # ---- Upload artifacts ----
@@ -151,12 +156,11 @@ jobs:
           path: bench_results.csv
           retention-days: 90
 
-      - name: Upload benchmark results (JSON)
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmarks-${{ matrix.os }}-${{ matrix.compiler }}-json
-          path: bench_results.json
-          retention-days: 90
+      # The JSON artifact is deliberately gone. Producing it needed a second
+      # full sweep of every algorithm on every runner, and no job in this
+      # repository ever read it -- regression-check and store-history both
+      # parse the CSV. To bring it back, add a step that converts
+      # bench_results.csv rather than re-running bench_all with --json.
 
   # ---- Regression detection ----
   regression-check:
