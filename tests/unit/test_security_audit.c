@@ -42,23 +42,42 @@ static void check(int cond, const char *what)
 /* 1. SNOVA / CROSS: declared signature size vs. what sign() emits      */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Skipped only because key generation is too expensive for a unit test,
+ * never because an algorithm is broken.
+ *
+ * The distinction matters. Staying inside max_signature_size() is a
+ * memory-safety property that every registered algorithm owes its
+ * caller, working or not -- so this sweep must not be gated on whether
+ * an algorithm is otherwise correct. Excluding by name on grounds of
+ * brokenness is exactly how the SNOVA and CROSS overflow survived: the
+ * general round-trip test in test_sig_all.c already allocates
+ * calloc(1, max_signature_size()) and signs into it, which is the shape
+ * that catches this, but those schemes sat outside its allow list.
+ *
+ * These entries rebuild a Merkle tree of 2^h leaves per key: XMSS-20 is
+ * 2^20 leaves and does not finish in a test run at all.
+ */
+static int bounds_sweep_too_slow(const char *name)
+{
+    return strcmp(name, "XMSS-SHA2-16-256") == 0 ||
+           strcmp(name, "XMSS-SHA2-20-256") == 0 ||
+           strcmp(name, "LMS-SHA256-H15")   == 0 ||
+           strcmp(name, "LMS-SHA256-H20")   == 0 ||
+           strcmp(name, "LMS-SHA256-H25")   == 0;
+}
+
 static void test_sig_buffer_bounds(void)
 {
-    static const char *algs[] = {
-        "SNOVA-24-5-4", "SNOVA-25-8-3", "SNOVA-28-17-3",
-        "CROSS-RSDP-128-fast", "CROSS-RSDP-128-small",
-        "CROSS-RSDP-192-fast", "CROSS-RSDP-192-small",
-        "CROSS-RSDP-256-fast", "CROSS-RSDP-256-small",
-        "MAYO-1", "UOV-Is",
-        NULL
-    };
     const uint8_t msg[] = "audit regression message";
-    int a;
+    int a, total = pqc_sig_algorithm_count(), swept = 0;
 
     printf("\n[1] sign() must not exceed max_signature_size\n");
+    printf("        sweeping every registered signature algorithm (%d)\n", total);
 
-    for (a = 0; algs[a]; a++) {
-        PQC_SIG *sig = pqc_sig_new(algs[a]);
+    for (a = 0; a < total; a++) {
+        const char *alg = pqc_sig_algorithm_name(a);
+        PQC_SIG *sig;
         uint8_t *pk, *sk, *sigbuf;
         size_t maxlen, siglen = 0;
         pqc_status_t rc;
@@ -68,13 +87,20 @@ static void test_sig_buffer_bounds(void)
         size_t guard = 64, i;
         int clean = 1;
 
-        if (!sig) { printf("  SKIP  %s (not registered)\n", algs[a]); continue; }
+        if (!alg) continue;
+        if (bounds_sweep_too_slow(alg)) {
+            printf("  SKIP  %s (keygen cost, not correctness)\n", alg);
+            continue;
+        }
+
+        sig = pqc_sig_new(alg);
+        if (!sig) { printf("  SKIP  %s (not registered)\n", alg); continue; }
 
         maxlen = pqc_sig_max_signature_size(sig);
         pk = (uint8_t *)calloc(1, pqc_sig_public_key_size(sig));
         sk = (uint8_t *)calloc(1, pqc_sig_secret_key_size(sig));
         sigbuf = (uint8_t *)malloc(maxlen + guard);
-        if (!pk || !sk || !sigbuf) { printf("  SKIP  %s (alloc)\n", algs[a]);
+        if (!pk || !sk || !sigbuf) { printf("  SKIP  %s (alloc)\n", alg);
             free(pk); free(sk); free(sigbuf); pqc_sig_free(sig); continue; }
 
         memset(sigbuf, 0, maxlen);
@@ -82,30 +108,38 @@ static void test_sig_buffer_bounds(void)
 
         rc = pqc_sig_keygen(sig, pk, sk);
         if (rc != PQC_OK) {
-            printf("  SKIP  %s (keygen rc=%d)\n", algs[a], rc);
+            printf("  SKIP  %s (keygen rc=%d)\n", alg, rc);
             free(pk); free(sk); free(sigbuf); pqc_sig_free(sig); continue;
         }
 
-        rc = pqc_sig_sign(sig, sigbuf, &siglen, msg, sizeof(msg), sk);
+        if (pqc_sig_is_stateful(sig)) {
+            rc = pqc_sig_sign_stateful(sig, sigbuf, &siglen,
+                                       msg, sizeof(msg), sk);
+        } else {
+            rc = pqc_sig_sign(sig, sigbuf, &siglen, msg, sizeof(msg), sk);
+        }
+        swept++;
 
         for (i = 0; i < guard; i++) {
             if (sigbuf[maxlen + i] != CANARY) { clean = 0; break; }
         }
 
         snprintf(label, sizeof(label),
-                 "%s: no write past max_signature_size (%zu)", algs[a], maxlen);
+                 "%s: no write past max_signature_size (%zu)", alg, maxlen);
         check(clean, label);
 
         if (rc == PQC_OK) {
             snprintf(label, sizeof(label),
                      "%s: reported siglen %zu <= max %zu",
-                     algs[a], siglen, maxlen);
+                     alg, siglen, maxlen);
             check(siglen <= maxlen, label);
         }
 
         free(pk); free(sk); free(sigbuf);
         pqc_sig_free(sig);
     }
+
+    printf("        %d of %d algorithms actually signed\n", swept, total);
 }
 
 /*
