@@ -25,10 +25,10 @@ by the sanitizer jobs once they were running again.
   to the next chain's secret-key PRF depended on how many steps the
   previous chain took, which differs between key generation (always w-1
   steps) and signing (digit-many steps). Affected chains derived
-  different secrets in the two paths. This surfaced only once the
-  `keyAndMask` fix in 0.2.0 made that field significant; before then it
-  was masked by every node sharing one key. Reproduced at roughly 1 run
-  in 12, and on every platform.
+  different secrets in the two paths. This was latent until the
+  `keyAndMask` fix below made that field significant; before then every
+  node shared one key and the leftover state could not matter. Reproduced
+  at roughly 1 run in 12, and on every platform.
 - **FN-DSA: undefined behaviour converting out-of-range doubles to
   `int32_t`** in `ntru_solve.c` and `sign.c`. The NTRU solver can diverge
   and produce magnitudes around 1e15; an out-of-range or NaN
@@ -81,6 +81,22 @@ by the sanitizer jobs once they were running again.
 - **FN-DSA: signed integer overflow in `ntru_solve.c`** (undefined behaviour).
   Field-norm accumulation now uses unsigned arithmetic.
 
+### Fixed
+
+- **`pqc_hybrid_kem_count()`, `pqc_hybrid_kem_name()`,
+  `pqc_hybrid_sig_count()` and `pqc_hybrid_sig_name()` are now
+  implemented.** All four are declared in the installed header
+  `include/pqc/hybrid.h` but were never defined anywhere in `src/`, so any
+  consumer that referenced them failed to link — which is how the Go
+  binding was failing. They are driven off the same vtable lists used for
+  registration, so the enumeration cannot drift from what is actually
+  registered.
+- **`pqc_sig_sign()` no longer dereferences a NULL function pointer for
+  stateful schemes.** LMS and XMSS leave `.sign` NULL and are signed
+  through `pqc_sig_sign_stateful()`; the stateless entry point did not
+  check, so calling it on one of them crashed rather than reporting the
+  misuse. It now returns `PQC_ERROR_NOT_SUPPORTED`.
+
 ### Changed
 
 - LMS-SHA256-H20 and H25 keygen now return `PQC_ERROR_NOT_SUPPORTED` rather
@@ -97,7 +113,17 @@ by the sanitizer jobs once they were running again.
 - `tests/unit/test_security_audit.c`: regression tests asserting the
   violated invariant for each defect above, rather than round-trip success.
   Several of these defects were invisible to round-trip testing because
-  signing and verification shared the broken code.
+  signing and verification shared the broken code. 125 checks.
+- The signature-buffer bounds group sweeps every registered algorithm
+  (`pqc_sig_algorithm_count()`) rather than a fixed list: 54 considered, 47
+  signed. Staying inside `max_signature_size()` is a property every
+  algorithm owes its caller whether or not it is otherwise correct, so it
+  is deliberately not gated on brokenness — excluding schemes by name for
+  being broken is how the SNOVA and CROSS overflow survived. Remaining
+  skips are for key-generation cost only.
+- The WOTS+ round-trip invariant (`pk_from_sig(sign(m), m) == keygen()`)
+  over many base-w digit patterns, which is what isolated the XMSS
+  chain-secret defect above.
 
 ### Changed (CI)
 
