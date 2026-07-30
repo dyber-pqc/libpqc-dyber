@@ -137,6 +137,14 @@ pqc_status_t pqc_sig_sign(const PQC_SIG *sig,
                            const uint8_t *secret_key) {
     if (!sig || !signature || !signature_len || !message || !secret_key)
         return PQC_ERROR_INVALID_ARGUMENT;
+    /*
+     * Stateful schemes (LMS, XMSS) leave .sign NULL and are signed through
+     * pqc_sig_sign_stateful() instead. Without this guard, calling the
+     * stateless entry point on one of them dereferences a NULL function
+     * pointer rather than reporting the misuse.
+     */
+    if (!sig->vtable->sign)
+        return PQC_ERROR_NOT_SUPPORTED;
     return sig->vtable->sign(signature, signature_len, message, message_len,
                              secret_key);
 }
