@@ -33,9 +33,6 @@ int ecdh_p256_keygen(uint8_t pk[65], uint8_t sk[32])
         if (rc != PQC_OK)
             return (int)rc;
 
-        /* Ensure sk < n by clearing the top bit if needed */
-        sk[0] &= 0xFF;  /* Keep as is -- n is close to 2^256 */
-
         /* Check sk != 0 */
         uint8_t z = 0;
         for (int i = 0; i < 32; i++) z |= sk[i];
@@ -68,6 +65,14 @@ int ecdh_p256_shared_secret(uint8_t ss[32], const uint8_t pk[65],
     /* Decode the peer's public key */
     p256_point P;
     if (p256_point_decode(&P, pk) != 0)
+        return -1;
+
+    /* The private scalar must be in [1, n-1] */
+    p256_fe sk_fe;
+    p256_scalar_frombytes(sk_fe, sk);
+    int out_of_range = p256_fe_is_zero(sk_fe) || p256_fe_cmp(sk_fe, P256_N) >= 0;
+    pqc_memzero(sk_fe, sizeof(sk_fe));
+    if (out_of_range)
         return -1;
 
     /* Compute shared point: S = sk * P */

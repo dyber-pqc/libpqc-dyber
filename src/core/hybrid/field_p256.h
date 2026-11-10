@@ -55,6 +55,8 @@ void p256_scalar_frombytes(p256_fe h, const uint8_t s[32]);
 void p256_scalar_tobytes(uint8_t s[32], const p256_fe h);
 void p256_scalar_mul(p256_fe h, const p256_fe f, const p256_fe g);
 void p256_scalar_add(p256_fe h, const p256_fe f, const p256_fe g);
+/* h = h mod n, for any 256-bit h */
+void p256_scalar_reduce(p256_fe h);
 void p256_scalar_inv(p256_fe h, const p256_fe f);
 
 /* Point on P-256 in Jacobian coordinates (X, Y, Z) where x=X/Z^2, y=Y/Z^3 */
