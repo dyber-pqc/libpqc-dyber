@@ -85,8 +85,16 @@ static void x25519_scalar_mult(uint8_t q[32], const uint8_t n[32],
         fe25519_mul(z3, x1, tmp0);
 
         fe25519_mul(x2, AA, BB);
+        /*
+         * z2 = E * (AA + a24 * E) with a24 = (A - 2)/4 = 121665
+         * (RFC 7748 section 5). fe25519_mul121666 multiplies by
+         * (A + 2)/4 = 121666, and since AA = BB + E the same value is
+         * E * (BB + 121666 * E). Adding AA here instead of BB gives
+         * E * (AA + 121666 * E), the ladder for A = 486666: a different
+         * curve.
+         */
         fe25519_mul121666(tmp1, E);
-        fe25519_add(tmp1, AA, tmp1);
+        fe25519_add(tmp1, BB, tmp1);
         fe25519_mul(z2, E, tmp1);
     }
 

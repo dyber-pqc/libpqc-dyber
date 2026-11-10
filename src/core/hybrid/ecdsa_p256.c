@@ -18,9 +18,6 @@
 #include "field_p256.h"
 #include "ecdsa_p256.h"
 
-/* Defined in field_p256.c */
-extern uint64_t sub256_v2(p256_fe r, const p256_fe a, const p256_fe b);
-
 /* ------------------------------------------------------------------ */
 /* RFC 6979 deterministic nonce generation                              */
 /* ------------------------------------------------------------------ */
@@ -31,12 +28,25 @@ extern uint64_t sub256_v2(p256_fe r, const p256_fe a, const p256_fe b);
  *
  * Input: x (private key scalar, 32 bytes), h1 (message hash, 32 bytes)
  * Output: k (nonce scalar, 32 bytes), guaranteed in [1, n-1]
+ * Returns 0 on success, -1 if no candidate was accepted (not reachable
+ * in practice: each candidate is rejected with probability 2^-32).
  */
-static void rfc6979_generate_k(uint8_t k_out[32], const uint8_t x[32],
-                                 const uint8_t h1[32])
+static int rfc6979_generate_k(uint8_t k_out[32], const uint8_t x[32],
+                                const uint8_t hash[32])
 {
     uint8_t V[32], K[32];
     uint8_t data[32 + 1 + 32 + 32]; /* V || 0x00/0x01 || x || h1 */
+
+    /*
+     * bits2octets(hash): the hash as an integer, reduced mod n
+     * (RFC 6979 section 2.3.4). The raw hash differs from this whenever
+     * it is >= n.
+     */
+    uint8_t h1[32];
+    p256_fe h_fe;
+    p256_scalar_frombytes(h_fe, hash);
+    p256_scalar_reduce(h_fe);
+    p256_scalar_tobytes(h1, h_fe);
 
     /* Step b: V = 0x01 0x01 ... 0x01 (32 bytes) */
     memset(V, 0x01, 32);
@@ -82,7 +92,8 @@ static void rfc6979_generate_k(uint8_t k_out[32], const uint8_t x[32],
         memcpy(k_out, V, 32);
         pqc_memzero(V, sizeof(V));
         pqc_memzero(K, sizeof(K));
-        return;
+        pqc_memzero(data, sizeof(data));
+        return 0;
 
 retry:
         /* K = HMAC_K(V || 0x00) */
@@ -96,6 +107,8 @@ retry:
     /* Should not reach here with valid inputs */
     pqc_memzero(V, sizeof(V));
     pqc_memzero(K, sizeof(K));
+    pqc_memzero(data, sizeof(data));
+    return -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -157,9 +170,17 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
 
     const uint8_t *d = sk;  /* Private scalar */
 
+    p256_fe r_fe, k_fe, d_fe, h_fe;
+
+    /* The private scalar must be in [1, n-1] */
+    p256_scalar_frombytes(d_fe, d);
+    if (p256_fe_is_zero(d_fe) || p256_fe_cmp(d_fe, P256_N) >= 0)
+        return -1;
+
     /* Generate deterministic k */
     uint8_t k_bytes[32];
-    rfc6979_generate_k(k_bytes, d, h);
+    if (rfc6979_generate_k(k_bytes, d, h) != 0)
+        return -1;
 
     /* Compute R = k * G */
     p256_point R;
@@ -169,15 +190,10 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
     uint8_t rx[32], ry[32];
     p256_point_to_affine(rx, ry, &R);
 
-    p256_fe r_fe, k_fe, d_fe, h_fe;
     p256_scalar_frombytes(r_fe, rx);
 
     /* Reduce r mod n (r_fe might be >= n since it's a field element mod p) */
-    if (p256_fe_cmp(r_fe, P256_N) >= 0) {
-        p256_fe tmp;
-        sub256_v2(tmp, r_fe, P256_N);
-        p256_fe_copy(r_fe, tmp);
-    }
+    p256_scalar_reduce(r_fe);
 
     /* Check r != 0 */
     if (p256_fe_is_zero(r_fe)) {
@@ -187,8 +203,8 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
 
     /* s = k^{-1} * (h + r*d) mod n */
     p256_scalar_frombytes(k_fe, k_bytes);
-    p256_scalar_frombytes(d_fe, d);
     p256_scalar_frombytes(h_fe, h);
+    p256_scalar_reduce(h_fe);   /* the hash as an integer, mod n */
 
     p256_fe rd, s_fe, k_inv;
 
@@ -245,6 +261,7 @@ int ecdsa_p256_verify(const uint8_t *msg, size_t msglen,
 
     p256_fe h_fe;
     p256_scalar_frombytes(h_fe, h);
+    p256_scalar_reduce(h_fe);
 
     /* w = s^{-1} mod n */
     p256_fe w;
@@ -286,11 +303,7 @@ int ecdsa_p256_verify(const uint8_t *msg, size_t msglen,
 
     p256_fe v;
     p256_scalar_frombytes(v, rx);
-    if (p256_fe_cmp(v, P256_N) >= 0) {
-        p256_fe tmp;
-        sub256_v2(tmp, v, P256_N);
-        p256_fe_copy(v, tmp);
-    }
+    p256_scalar_reduce(v);
 
     /* Check v == r */
     if (p256_fe_cmp(v, r_fe) != 0)
