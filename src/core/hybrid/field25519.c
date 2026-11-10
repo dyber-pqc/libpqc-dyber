@@ -31,34 +31,40 @@ static uint64_t load48(const uint8_t *b)
          | ((uint64_t)b[5] << 40);
 }
 
+static void store64(uint8_t *b, uint64_t v)
+{
+    for (int i = 0; i < 8; i++)
+        b[i] = (uint8_t)(v >> (8 * i));
+}
+
+/*
+ * Decode 32 little-endian bytes into five 51-bit limbs.
+ *
+ * Limb i holds bits 51*i .. 51*i+50 of the input, so bit 255 is ignored,
+ * which is what RFC 7748 section 5 requires for X25519 u-coordinates.
+ * Callers for which bit 255 carries meaning (the sign of x in an encoded
+ * Ed25519 point) must read it from the byte string themselves.
+ *
+ * The value is not reduced: inputs in [p, 2^255) decode to their
+ * non-canonical representative, and fe25519_tobytes() reduces them.
+ */
 void fe25519_frombytes(fe25519 h, const uint8_t s[32])
 {
-    uint64_t h0 = load48(s);
-    uint64_t h1 = load48(s + 6) >> 3;
-    uint64_t h2 = load48(s + 12) >> 6;
-    uint64_t h3 = load48(s + 19) >> 1;
-    uint64_t h4 = (load48(s + 25) >> 4) | ((uint64_t)s[31] << 44);
-
-    /* Mask to 51 bits each, carry the rest */
     static const uint64_t MASK51 = (1ULL << 51) - 1;
 
-    h[0] = h0 & MASK51;
-    h1  += h0 >> 51;
-    h[1] = h1 & MASK51;
-    h2  += h1 >> 51;
-    h[2] = h2 & MASK51;
-    h3  += h2 >> 51;
-    h[3] = h3 & MASK51;
-    h4  += h3 >> 51;
-    h[4] = h4 & MASK51;
-
-    /* Fold top carry: carry * 19 back to h[0] */
-    h[0] += 19 * (h4 >> 51);
-    h[4] &= MASK51;
+    h[0] = (load48(s) | ((uint64_t)s[6] << 48)) & MASK51;
+    h[1] = ((load48(s + 6) | ((uint64_t)s[12] << 48)) >> 3) & MASK51;
+    h[2] = ((load48(s + 12) | ((uint64_t)s[18] << 48)
+                            | ((uint64_t)s[19] << 56)) >> 6) & MASK51;
+    h[3] = ((load48(s + 19) | ((uint64_t)s[25] << 48)) >> 1) & MASK51;
+    h[4] = ((load48(s + 25) | ((uint64_t)s[31] << 48)) >> 4) & MASK51;
 }
 
 /*
  * Reduce fully and encode as 32 little-endian bytes.
+ *
+ * The output is the canonical representative in [0, p). Limbs of the
+ * input may be as large as 2^63.
  */
 void fe25519_tobytes(uint8_t s[32], const fe25519 h)
 {
@@ -75,7 +81,7 @@ void fe25519_tobytes(uint8_t s[32], const fe25519 h)
     c = t[3] >> 51; t[3] &= MASK51; t[4] += c;
     c = t[4] >> 51; t[4] &= MASK51; t[0] += c * 19;
 
-    /* Second pass */
+    /* Second pass: afterwards every limb is below 2^51, value < 2^255 */
     c = t[0] >> 51; t[0] &= MASK51; t[1] += c;
     c = t[1] >> 51; t[1] &= MASK51; t[2] += c;
     c = t[2] >> 51; t[2] &= MASK51; t[3] += c;
@@ -83,11 +89,11 @@ void fe25519_tobytes(uint8_t s[32], const fe25519 h)
     c = t[4] >> 51; t[4] &= MASK51; t[0] += c * 19;
 
     /*
-     * Conditional subtraction of p = 2^255 - 19.
-     * If t >= p, subtract p. We compute t - p, check the borrow,
-     * and select accordingly.
+     * Conditional subtraction of p = 2^255 - 19, whose limbs are
+     * (2^51 - 19, 2^51 - 1, 2^51 - 1, 2^51 - 1, 2^51 - 1).
+     * Compute t - p limb by limb; the final borrow says whether t < p.
      */
-    uint64_t m = t[0] - 0xFFFFFFFFFFFFEDULL;
+    uint64_t m = t[0] - 0x7FFFFFFFFFFEDULL;
     uint64_t borrow = (m >> 63);
     uint64_t s1 = t[1] - MASK51 - borrow;
     borrow = (s1 >> 63);
@@ -106,68 +112,11 @@ void fe25519_tobytes(uint8_t s[32], const fe25519 h)
     t[3] ^= (t[3] ^ (s3 & MASK51)) & ~mask;
     t[4] ^= (t[4] ^ (s4 & MASK51)) & ~mask;
 
-    /* Pack 255 bits into 32 bytes, little-endian */
-    uint64_t combined;
-
-    combined = t[0] | (t[1] << 51);
-    s[0]  = (uint8_t)(combined);
-    s[1]  = (uint8_t)(combined >> 8);
-    s[2]  = (uint8_t)(combined >> 16);
-    s[3]  = (uint8_t)(combined >> 24);
-    s[4]  = (uint8_t)(combined >> 32);
-    s[5]  = (uint8_t)(combined >> 40);
-    s[6]  = (uint8_t)(combined >> 48);
-
-    combined = (t[1] >> 13) | (t[2] << 38);
-    s[6]  |= (uint8_t)(((t[1] >> 13) & 0xFF));
-    /* Redo packing more carefully using the standard approach */
-
-    /* Actually, let's pack using a simple bit-shifting approach */
-    uint64_t val = t[0] | (t[1] << 51);
-    s[0]  = (uint8_t)(val);
-    s[1]  = (uint8_t)(val >> 8);
-    s[2]  = (uint8_t)(val >> 16);
-    s[3]  = (uint8_t)(val >> 24);
-    s[4]  = (uint8_t)(val >> 32);
-    s[5]  = (uint8_t)(val >> 40);
-    s[6]  = (uint8_t)(val >> 48);
-    s[7]  = (uint8_t)(val >> 56);
-
-    /* Actually, let's do this the clean way using 128-bit accumulation */
-    /* Pack 5 x 51-bit limbs into 32 bytes */
-    {
-        uint64_t lo;
-        /* Limbs: t0 t1 t2 t3 t4, each 51 bits */
-        /* Total: 255 bits = 32 bytes (top bit always 0) */
-
-        /* Bytes 0..7: bits 0..63 = t0[50:0] + t1[12:0] */
-        lo = t[0] | (t[1] << 51);
-        s[0] = (uint8_t)(lo);       s[1] = (uint8_t)(lo >> 8);
-        s[2] = (uint8_t)(lo >> 16);  s[3] = (uint8_t)(lo >> 24);
-        s[4] = (uint8_t)(lo >> 32);  s[5] = (uint8_t)(lo >> 40);
-        s[6] = (uint8_t)(lo >> 48);  s[7] = (uint8_t)(lo >> 56);
-
-        /* Bytes 8..15: bits 64..127 = t1[50:13] + t2[25:0] */
-        lo = (t[1] >> 13) | (t[2] << 38);
-        s[8]  = (uint8_t)(lo);       s[9]  = (uint8_t)(lo >> 8);
-        s[10] = (uint8_t)(lo >> 16);  s[11] = (uint8_t)(lo >> 24);
-        s[12] = (uint8_t)(lo >> 32);  s[13] = (uint8_t)(lo >> 40);
-        s[14] = (uint8_t)(lo >> 48);  s[15] = (uint8_t)(lo >> 56);
-
-        /* Bytes 16..23: bits 128..191 = t2[50:26] + t3[38:0] */
-        lo = (t[2] >> 26) | (t[3] << 25);
-        s[16] = (uint8_t)(lo);       s[17] = (uint8_t)(lo >> 8);
-        s[18] = (uint8_t)(lo >> 16);  s[19] = (uint8_t)(lo >> 24);
-        s[20] = (uint8_t)(lo >> 32);  s[21] = (uint8_t)(lo >> 40);
-        s[22] = (uint8_t)(lo >> 48);  s[23] = (uint8_t)(lo >> 56);
-
-        /* Bytes 24..31: bits 192..255 = t3[50:39] + t4[50:0] */
-        lo = (t[3] >> 39) | (t[4] << 12);
-        s[24] = (uint8_t)(lo);       s[25] = (uint8_t)(lo >> 8);
-        s[26] = (uint8_t)(lo >> 16);  s[27] = (uint8_t)(lo >> 24);
-        s[28] = (uint8_t)(lo >> 32);  s[29] = (uint8_t)(lo >> 40);
-        s[30] = (uint8_t)(lo >> 48);  s[31] = (uint8_t)(lo >> 56);
-    }
+    /* Pack 5 x 51-bit limbs (255 bits, top bit always 0) into 32 bytes */
+    store64(s,      t[0]        | (t[1] << 51));  /* bits   0.. 63 */
+    store64(s + 8,  (t[1] >> 13) | (t[2] << 38)); /* bits  64..127 */
+    store64(s + 16, (t[2] >> 26) | (t[3] << 25)); /* bits 128..191 */
+    store64(s + 24, (t[3] >> 39) | (t[4] << 12)); /* bits 192..255 */
 }
 
 /* ------------------------------------------------------------------ */
@@ -199,29 +148,42 @@ void fe25519_add(fe25519 h, const fe25519 f, const fe25519 g)
     h[4] = f[4] + g[4];
 }
 
+/*
+ * Limb bounds.
+ *
+ * fe25519_mul() and fe25519_sq() accept limbs below 2^54 and return limbs
+ * below 2^51 + 2^13. fe25519_add() does not carry, so a sum of two such
+ * values has limbs below 2^52 + 2^14, and a few further additions stay
+ * below 2^54. fe25519_sub() accepts limbs below 2^54 - 152 for the
+ * subtrahend and carries its result back down to 2^51 + 2^9, so the
+ * output of a subtraction can be fed to anything.
+ */
 void fe25519_sub(fe25519 h, const fe25519 f, const fe25519 g)
 {
     /*
-     * To avoid underflow we add 2*p before subtracting.
-     * 2*p = 2*(2^255 - 19), split into limbs:
-     *   limb0: 2^52 - 38
-     *   limb1..3: 2^52 - 2
-     *   limb4: 2^52 - 2
-     * Actually, we use a multiple that keeps things in range.
+     * Add 8*p before subtracting so that no limb can go negative, then
+     * carry. 8*p in limbs is (2^54 - 152, 2^54 - 8, ..., 2^54 - 8).
+     *
+     * Without the carry the result of a subtraction has limbs near 2^52,
+     * and subtracting such a value again (as the Edwards point formulas
+     * do) underflows.
      */
-    static const uint64_t TWO_P[5] = {
-        0xFFFFFFFFFFFDAULL,     /* 2*(2^51 - 19) */
-        0xFFFFFFFFFFFFEULL,     /* 2*(2^51 - 1) */
-        0xFFFFFFFFFFFFEULL,
-        0xFFFFFFFFFFFFEULL,
-        0xFFFFFFFFFFFFEULL,
+    static const uint64_t EIGHT_P[5] = {
+        0x3FFFFFFFFFFF68ULL,    /* 8*(2^51 - 19) */
+        0x3FFFFFFFFFFFF8ULL,    /* 8*(2^51 - 1) */
+        0x3FFFFFFFFFFFF8ULL,
+        0x3FFFFFFFFFFFF8ULL,
+        0x3FFFFFFFFFFFF8ULL,
     };
+    fe25519 t;
 
-    h[0] = (f[0] + TWO_P[0]) - g[0];
-    h[1] = (f[1] + TWO_P[1]) - g[1];
-    h[2] = (f[2] + TWO_P[2]) - g[2];
-    h[3] = (f[3] + TWO_P[3]) - g[3];
-    h[4] = (f[4] + TWO_P[4]) - g[4];
+    t[0] = (f[0] + EIGHT_P[0]) - g[0];
+    t[1] = (f[1] + EIGHT_P[1]) - g[1];
+    t[2] = (f[2] + EIGHT_P[2]) - g[2];
+    t[3] = (f[3] + EIGHT_P[3]) - g[3];
+    t[4] = (f[4] + EIGHT_P[4]) - g[4];
+
+    fe25519_reduce(h, t);
 }
 
 void fe25519_neg(fe25519 h, const fe25519 f)
@@ -526,56 +488,19 @@ void fe25519_cmov(fe25519 f, const fe25519 g, uint64_t b)
 
 /* ------------------------------------------------------------------ */
 /* Scalar multiply: h = f * 121666                                      */
-/* Used in the X25519 Montgomery ladder for (a24 = 121666).            */
+/* Used in the X25519 Montgomery ladder, where (A + 2)/4 = 121666.     */
 /* ------------------------------------------------------------------ */
 
 void fe25519_mul121666(fe25519 h, const fe25519 f)
 {
-    static const uint64_t MASK51 = (1ULL << 51) - 1;
-
-#ifdef __SIZEOF_INT128__
-    uint128_t t0 = (uint128_t)f[0] * 121666;
-    uint128_t t1 = (uint128_t)f[1] * 121666;
-    uint128_t t2 = (uint128_t)f[2] * 121666;
-    uint128_t t3 = (uint128_t)f[3] * 121666;
-    uint128_t t4 = (uint128_t)f[4] * 121666;
-
-    uint64_t c;
-    c = (uint64_t)(t0 >> 51); h[0] = (uint64_t)t0 & MASK51;
-    t1 += c;
-    c = (uint64_t)(t1 >> 51); h[1] = (uint64_t)t1 & MASK51;
-    t2 += c;
-    c = (uint64_t)(t2 >> 51); h[2] = (uint64_t)t2 & MASK51;
-    t3 += c;
-    c = (uint64_t)(t3 >> 51); h[3] = (uint64_t)t3 & MASK51;
-    t4 += c;
-    c = (uint64_t)(t4 >> 51); h[4] = (uint64_t)t4 & MASK51;
-
-    h[0] += c * 19;
-    c = h[0] >> 51; h[0] &= MASK51;
-    h[1] += c;
-#else
-    uint64_t c, r;
-
-    r = f[0] * 121666ULL;
-    h[0] = r & MASK51; c = r >> 51;
-
-    r = f[1] * 121666ULL + c;
-    h[1] = r & MASK51; c = r >> 51;
-
-    r = f[2] * 121666ULL + c;
-    h[2] = r & MASK51; c = r >> 51;
-
-    r = f[3] * 121666ULL + c;
-    h[3] = r & MASK51; c = r >> 51;
-
-    r = f[4] * 121666ULL + c;
-    h[4] = r & MASK51; c = r >> 51;
-
-    h[0] += c * 19;
-    c = h[0] >> 51; h[0] &= MASK51;
-    h[1] += c;
-#endif
+    /*
+     * Goes through the general multiplication rather than a dedicated
+     * single-word one. The product of a 51-bit limb and 121666 needs 68
+     * bits, and the previous hand-written path for compilers without a
+     * 128-bit integer computed it in 64.
+     */
+    static const fe25519 k121666 = { 121666, 0, 0, 0, 0 };
+    fe25519_mul(h, f, k121666);
 }
 
 /* ------------------------------------------------------------------ */

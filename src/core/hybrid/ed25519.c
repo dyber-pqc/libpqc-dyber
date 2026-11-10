@@ -26,20 +26,27 @@
 /* Constants                                                            */
 /* ------------------------------------------------------------------ */
 
-/* d = -121665/121666 mod p, in little-endian bytes */
+/*
+ * d = -121665/121666 mod p, in little-endian bytes:
+ * 0x52036cee2b6ffe738cc740797779e89800700a4d4141d8ab75eb4dca135978a3
+ * (RFC 8032 section 5.1).
+ */
 static const uint8_t ED25519_D_BYTES[32] = {
     0xa3, 0x78, 0x59, 0x13, 0xca, 0x4d, 0xeb, 0x75,
-    0xab, 0xd1, 0x58, 0x4f, 0x01, 0x47, 0x72, 0x51,
-    0x98, 0xf5, 0xa6, 0xc2, 0xf0, 0x81, 0x42, 0xbf,
-    0x03, 0x03, 0x06, 0x95, 0x5d, 0x40, 0x12, 0x52,
+    0xab, 0xd8, 0x41, 0x41, 0x4d, 0x0a, 0x70, 0x00,
+    0x98, 0xe8, 0x79, 0x77, 0x79, 0x40, 0xc7, 0x8c,
+    0x73, 0xfe, 0x6f, 0x2b, 0xee, 0x6c, 0x03, 0x52,
 };
 
-/* 2*d mod p */
+/*
+ * 2*d mod p:
+ * 0x2406d9dc56dffce7198e80f2eef3d13000e0149a8283b156ebd69b9426b2f159
+ */
 static const uint8_t ED25519_2D_BYTES[32] = {
-    0x45, 0xf1, 0xb2, 0x26, 0x94, 0x9b, 0xd6, 0xeb,
-    0x56, 0xa3, 0xb1, 0x9e, 0x02, 0x8e, 0xe4, 0xa2,
-    0x30, 0xeb, 0x4d, 0x85, 0xe1, 0x03, 0x85, 0x7e,
-    0x06, 0x06, 0x0c, 0x2a, 0xbb, 0x80, 0x24, 0x24,
+    0x59, 0xf1, 0xb2, 0x26, 0x94, 0x9b, 0xd6, 0xeb,
+    0x56, 0xb1, 0x83, 0x82, 0x9a, 0x14, 0xe0, 0x00,
+    0x30, 0xd1, 0xf3, 0xee, 0xf2, 0x80, 0x8e, 0x19,
+    0xe7, 0xfc, 0xdf, 0x56, 0xdc, 0xd9, 0x06, 0x24,
 };
 
 /* Base point y-coordinate in little-endian (x is recoverable) */
@@ -108,28 +115,38 @@ static void sc25519_reduce(uint8_t out[32], const uint8_t in[64])
         t[j] &= 0xFF;
     }
 
+    /*
+     * The loop above subtracted floor(t / 2^252) * l, which can overshoot
+     * by one l because l > 2^252; carry is then -1 and l is added back.
+     * The bytes are no longer normalised after that, so the carries have
+     * to be propagated while writing the result. (Masking each byte on
+     * its own, as this function used to, drops them.)
+     */
     for (j = 0; j < 32; j++)
         t[j] -= carry * L[j];
 
-    /* Output the reduced scalar */
     for (i = 0; i < 32; i++) {
-        t[i] += 256;  /* Ensure positive */
+        t[i + 1] += t[i] >> 8;
         out[i] = (uint8_t)(t[i] & 0xFF);
     }
+}
 
-    /* Final conditional subtraction of l */
-    int64_t borrow = 0;
-    uint8_t s[32];
-    for (i = 0; i < 32; i++) {
-        int64_t diff = (int64_t)out[i] - L[i] - borrow;
-        s[i] = (uint8_t)(diff & 0xFF);
-        borrow = (diff >> 8) & 1;
-    }
+/* Returns 1 if the 32-byte little-endian scalar s is below l, else 0. */
+static int sc25519_is_canonical(const uint8_t s[32])
+{
+    static const uint8_t L[32] = {
+        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
+        0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+    };
+    unsigned borrow = 0;
 
-    /* If no borrow, out >= l, so use the subtracted version */
-    uint8_t mask = (uint8_t)(borrow - 1); /* 0xFF if borrow==0 (use s), 0 if borrow==1 (keep out) */
-    for (i = 0; i < 32; i++)
-        out[i] ^= (out[i] ^ s[i]) & mask;
+    /* s - l borrows out of the top byte exactly when s < l */
+    for (int i = 0; i < 32; i++)
+        borrow = (((unsigned)s[i] - L[i] - borrow) >> 8) & 1;
+
+    return (int)borrow;
 }
 
 /* Multiply-and-add: r = (a * b + c) mod l, all inputs are 32-byte LE scalars */
@@ -176,17 +193,30 @@ static void ge25519_zero(ge25519 *p)
     fe25519_0(p->T);
 }
 
-/* Decode a point from 32-byte compressed form (y-coord + sign bit of x) */
+/*
+ * Decode a point from 32-byte compressed form (y-coord + sign bit of x),
+ * RFC 8032 section 5.1.3. Returns 0 on success, -1 if the encoding is not
+ * a point on the curve or is not canonical.
+ */
 static int ge25519_frombytes(ge25519 *p, const uint8_t s[32])
 {
     fe25519 u, v, v3, vxx, check, d;
     int x_sign = (s[31] >> 7) & 1;
 
-    /* Clear the sign bit and decode y */
-    uint8_t y_bytes[32];
+    /*
+     * Bit 255 is the sign of x, not part of y. fe25519_frombytes ignores
+     * it; clear it anyway so the canonical check below compares like
+     * with like.
+     */
+    uint8_t y_bytes[32], y_canon[32];
     memcpy(y_bytes, s, 32);
     y_bytes[31] &= 0x7F;
     fe25519_frombytes(p->Y, y_bytes);
+
+    /* Reject y >= p: re-encoding reduces, so a mismatch means non-canonical */
+    fe25519_tobytes(y_canon, p->Y);
+    if (memcmp(y_canon, y_bytes, 32) != 0)
+        return -1;
 
     /* u = y^2 - 1 */
     fe25519_sq(u, p->Y);
@@ -214,33 +244,31 @@ static int ge25519_frombytes(ge25519 *p, const uint8_t s[32])
     fe25519_mul(p->X, p->X, u);  /* u * v^3 * ... */
 
     /* Check: v * x^2 == u? */
+    fe25519 diff;
     fe25519_sq(vxx, p->X);
     fe25519_mul(check, vxx, v);
-    if (!fe25519_iszero(check) || 1) {
-        /* Check if check == u */
-        fe25519 diff;
-        fe25519_sub(diff, check, u);
+    fe25519_sub(diff, check, u);
+    if (!fe25519_iszero(diff)) {
+        /* v * x^2 == -u means x is off by a factor of sqrt(-1) */
+        fe25519_add(diff, check, u);
         if (!fe25519_iszero(diff)) {
-            /* Try x = x * sqrt(-1) -- but for Ed25519 use x * 2^((p-1)/4) */
-            fe25519 neg_u;
-            fe25519_neg(neg_u, u);
-            fe25519_sub(diff, check, neg_u);
-            if (!fe25519_iszero(diff)) {
-                /* Not on curve */
-                return -1;
-            }
-            /* x needs to be multiplied by sqrt(-1) */
-            static const uint8_t SQRT_M1_BYTES[32] = {
-                0xb0, 0xa0, 0x0e, 0x4a, 0x27, 0x1b, 0xee, 0xc4,
-                0x78, 0xe4, 0x2f, 0xad, 0x06, 0x18, 0x43, 0x2f,
-                0xa7, 0xd7, 0xfb, 0x3d, 0x99, 0x00, 0x4d, 0x2b,
-                0x0b, 0xdf, 0xc1, 0x4f, 0x80, 0x24, 0x83, 0x2b,
-            };
-            fe25519 sqrt_m1;
-            fe25519_frombytes(sqrt_m1, SQRT_M1_BYTES);
-            fe25519_mul(p->X, p->X, sqrt_m1);
+            /* u/v is not a square: no such point */
+            return -1;
         }
+        static const uint8_t SQRT_M1_BYTES[32] = {
+            0xb0, 0xa0, 0x0e, 0x4a, 0x27, 0x1b, 0xee, 0xc4,
+            0x78, 0xe4, 0x2f, 0xad, 0x06, 0x18, 0x43, 0x2f,
+            0xa7, 0xd7, 0xfb, 0x3d, 0x99, 0x00, 0x4d, 0x2b,
+            0x0b, 0xdf, 0xc1, 0x4f, 0x80, 0x24, 0x83, 0x2b,
+        };
+        fe25519 sqrt_m1;
+        fe25519_frombytes(sqrt_m1, SQRT_M1_BYTES);
+        fe25519_mul(p->X, p->X, sqrt_m1);
     }
+
+    /* x = 0 has no negative: the sign bit must be clear (RFC 8032 5.1.3) */
+    if (fe25519_iszero(p->X) && x_sign)
+        return -1;
 
     /* Adjust sign of x */
     if (fe25519_isnegative(p->X) != x_sign) {
@@ -293,32 +321,42 @@ static void ge25519_double(ge25519 *r, const ge25519 *p)
     fe25519_mul(r->Z, F, G);
 }
 
-/* Point addition: r = p + q (extended coordinates, using precomp 2d) */
+/*
+ * Point addition: r = p + q in extended coordinates, for a = -1
+ * (Hisil-Wong-Carter-Dawson 2008, section 3.1; "add-2008-hwcd-3").
+ * The formula is complete on this curve, so it also doubles and handles
+ * the neutral element. r may alias p or q.
+ *
+ *   A = (Y1-X1)(Y2-X2)   B = (Y1+X1)(Y2+X2)
+ *   C = 2d*T1*T2         D = 2*Z1*Z2
+ *   E = B-A  F = D-C  G = D+C  H = B+A
+ *   X3 = E*F  Y3 = G*H  T3 = E*H  Z3 = F*G
+ *
+ * E = 2(X1Y2 + Y1X2) and H = 2(Y1Y2 + X1X2) carry the same factor of 2 as
+ * C and D. The earlier code mixed this variant's C and D with the
+ * un-doubled E and H of the plain formula, which halves both affine
+ * coordinates of every sum.
+ */
 static void ge25519_add_full(ge25519 *r, const ge25519 *p, const ge25519 *q)
 {
-    fe25519 A, B, C, D, E, F, G, H, d2;
+    fe25519 A, B, C, D, E, F, G, H, d2, t0, t1;
 
     fe25519_frombytes(d2, ED25519_2D_BYTES);
 
-    fe25519_mul(A, p->X, q->X);
-    fe25519_mul(B, p->Y, q->Y);
+    fe25519_sub(t0, p->Y, p->X);
+    fe25519_sub(t1, q->Y, q->X);
+    fe25519_mul(A, t0, t1);
+    fe25519_add(t0, p->Y, p->X);
+    fe25519_add(t1, q->Y, q->X);
+    fe25519_mul(B, t0, t1);
     fe25519_mul(C, p->T, q->T);
     fe25519_mul(C, C, d2);
     fe25519_mul(D, p->Z, q->Z);
-    fe25519_add(D, D, D);   /* 2*Z1*Z2 */
+    fe25519_add(D, D, D);
 
-    fe25519_add(E, p->X, p->Y);
-    fe25519 tmp;
-    fe25519_add(tmp, q->X, q->Y);
-    fe25519_mul(E, E, tmp);
-    fe25519_sub(E, E, A);
-    fe25519_sub(E, E, B);   /* E = (X1+Y1)(X2+Y2) - A - B */
-
-    /* For a = -1 twisted Edwards: */
-    fe25519_sub(F, D, C);   /* F = D - C */
-    fe25519_add(G, D, C);   /* G = D + C */
-    fe25519_sub(H, B, A);   /* H = B - a*A = B + A for a=-1... wait */
-    /* Actually a=-1: a*A = -A, so B - (a*A) = B - (-A) = B + A */
+    fe25519_sub(E, B, A);
+    fe25519_sub(F, D, C);
+    fe25519_add(G, D, C);
     fe25519_add(H, B, A);
 
     fe25519_mul(r->X, E, F);
@@ -482,8 +520,12 @@ int ed25519_verify(const uint8_t *msg, size_t msglen,
      */
     const uint8_t *S = sig + 32;
 
-    /* Verify S < l */
-    /* (Simplified: just check top bit is clear and value < l) */
+    /*
+     * Reject S >= l (RFC 8032 section 5.1.7). Without this, (R, S + l)
+     * verifies whenever (R, S) does, so signatures are malleable.
+     */
+    if (!sc25519_is_canonical(S))
+        return -1;
 
     /* Compute S*B */
     ge25519 SB;

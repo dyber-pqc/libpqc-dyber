@@ -55,6 +55,14 @@ jobs:
           ASAN_OPTIONS: "detect_leaks=0:detect_stack_use_after_return=1:check_initialization_order=1"
           UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
         run: ./build/tests/test_security_audit
+      # Known-answer tests for X25519, Ed25519 and P-256 against RFC and
+      # NIST vectors. Round trips cannot catch a primitive that is wrong
+      # on both sides, which is how all four shipped broken in 0.2.0.
+      - name: Run classical primitive known-answer tests
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:detect_stack_use_after_return=1:check_initialization_order=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: ./build/tests/test_hybrid_classical
 
   # ============================================================
   # Memory Safety Audit

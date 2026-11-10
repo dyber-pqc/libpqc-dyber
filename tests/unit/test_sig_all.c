@@ -25,6 +25,9 @@ static const uint8_t test_message[] = "libpqc-dyber test message for signature v
 static const char *allow_list[] = {
     /* ML-DSA: verified correct via FIPS 204 */
     "ML-DSA-44", "ML-DSA-65", "ML-DSA-87",
+    /* Hybrids: classical halves verified against RFC 8032 and RFC 6979
+     * vectors in test_hybrid_classical.c */
+    "ML-DSA-65+Ed25519", "ML-DSA-87+P256",
     /* SLH-DSA: verified correct via FIPS 205 (all 12 param sets) */
     "SLH-DSA-SHA2-128s", "SLH-DSA-SHA2-128f",
     "SLH-DSA-SHA2-192s", "SLH-DSA-SHA2-192f",

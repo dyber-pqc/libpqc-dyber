@@ -55,6 +55,21 @@ add_test(NAME test_security_audit COMMAND test_security_audit)
 # is being asserted, so allow for it rather than reduce coverage.
 set_tests_properties(test_security_audit PROPERTIES TIMEOUT 1800)
 
+# Known-answer tests for the classical half of the hybrid schemes
+# (X25519, Ed25519, ECDH/ECDSA P-256) against RFC 7748, RFC 8032,
+# RFC 6979 and NIST CAVP vectors. Needs the internal source tree because
+# the primitives are not part of the public API, and only exists when the
+# hybrid schemes are compiled in.
+if(PQC_ENABLE_HYBRID)
+    add_executable(test_hybrid_classical unit/test_hybrid_classical.c)
+    target_link_libraries(test_hybrid_classical PRIVATE pqc_static)
+    target_include_directories(test_hybrid_classical PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME test_hybrid_classical COMMAND test_hybrid_classical)
+    set_tests_properties(test_hybrid_classical PROPERTIES TIMEOUT 300)
+endif()
+
 # Benchmarks (not added to CTest by default)
 if(PQC_BUILD_BENCHMARKS)
     # Common include path for bench_common.h

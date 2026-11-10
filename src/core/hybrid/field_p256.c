@@ -11,6 +11,11 @@
  * Reduction uses the special structure of the NIST prime.
  *
  * Group order n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+ *
+ * Field and scalar multiplication, addition and subtraction are
+ * branch-free. The point arithmetic is not: p256_point_scalar_mult() is
+ * a plain double-and-add whose sequence of operations depends on the
+ * scalar. See the note there.
  */
 
 #include <string.h>
@@ -128,49 +133,96 @@ void p256_fe_cmov(p256_fe f, const p256_fe g, uint64_t b)
 }
 
 /* ------------------------------------------------------------------ */
-/* Addition mod p                                                       */
+/* 256-bit integer helpers                                              */
 /* ------------------------------------------------------------------ */
 
-/* Returns carry (0 or 1) */
+/* r = a + b, returns the carry out (0 or 1) */
 static uint64_t add256(p256_fe r, const p256_fe a, const p256_fe b)
 {
     uint64_t carry = 0;
     for (int i = 0; i < 4; i++) {
-        uint64_t sum = a[i] + b[i] + carry;
-        carry = (sum < a[i]) || (carry && sum == a[i]);
-        r[i] = sum;
+        uint64_t s = a[i] + carry;
+        uint64_t c1 = (s < carry);
+        uint64_t t = s + b[i];
+        uint64_t c2 = (t < s);
+        r[i] = t;
+        carry = c1 | c2;
     }
     return carry;
 }
 
-/* Proper subtraction with borrow */
-uint64_t sub256_v2(p256_fe r, const p256_fe a, const p256_fe b)
+/* r = a - b, returns the borrow out (0 or 1) */
+static uint64_t sub256(p256_fe r, const p256_fe a, const p256_fe b)
 {
     uint64_t borrow = 0;
     for (int i = 0; i < 4; i++) {
-#ifdef __SIZEOF_INT128__
-        unsigned __int128 diff = (unsigned __int128)a[i] - b[i] - borrow;
-        r[i] = (uint64_t)diff;
-        borrow = (uint64_t)(diff >> 127) & 1;  /* Sign bit = borrow */
-#else
-        uint64_t lo = a[i] - b[i];
-        uint64_t br1 = (lo > a[i]) ? 1 : 0;
-        uint64_t lo2 = lo - borrow;
-        uint64_t br2 = (lo2 > lo) ? 1 : 0;
-        r[i] = lo2;
-        borrow = br1 | br2;
-#endif
+        uint64_t d = a[i] - b[i];
+        uint64_t b1 = (a[i] < b[i]);
+        uint64_t e = d - borrow;
+        uint64_t b2 = (d < borrow);
+        r[i] = e;
+        borrow = b1 | b2;
     }
     return borrow;
 }
 
+/* 64 x 64 -> 128: *hi:*lo = a * b */
+static void mul64x64(uint64_t *hi, uint64_t *lo, uint64_t a, uint64_t b)
+{
+#ifdef __SIZEOF_INT128__
+    unsigned __int128 p = (unsigned __int128)a * b;
+    *lo = (uint64_t)p;
+    *hi = (uint64_t)(p >> 64);
+#else
+    uint64_t a0 = (uint32_t)a, a1 = a >> 32;
+    uint64_t b0 = (uint32_t)b, b1 = b >> 32;
+    uint64_t p00 = a0 * b0;
+    uint64_t p01 = a0 * b1;
+    uint64_t p10 = a1 * b0;
+    uint64_t p11 = a1 * b1;
+    /* Cannot overflow: (2^32-1) + (2^32-1) + (2^32-1) < 2^64 */
+    uint64_t mid = (p00 >> 32) + (uint32_t)p01 + (uint32_t)p10;
+    *lo = (p00 & 0xFFFFFFFFULL) | (mid << 32);
+    *hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+#endif
+}
+
+/* t[0..7] = f * g, the full 512-bit product */
+static void mul256(uint64_t t[8], const p256_fe f, const p256_fe g)
+{
+    memset(t, 0, 8 * sizeof(uint64_t));
+
+    for (int i = 0; i < 4; i++) {
+        uint64_t carry = 0;
+        for (int j = 0; j < 4; j++) {
+            uint64_t hi, lo;
+            mul64x64(&hi, &lo, f[i], g[j]);
+
+            /* hi:lo + t[i+j] + carry fits in 128 bits */
+            lo += t[i + j];
+            hi += (lo < t[i + j]);
+            lo += carry;
+            hi += (lo < carry);
+
+            t[i + j] = lo;
+            carry = hi;
+        }
+        t[i + 4] = carry;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Addition and subtraction mod p                                       */
+/* ------------------------------------------------------------------ */
+
+/* Both operands must be below p; so is the result. */
 void p256_fe_add(p256_fe h, const p256_fe f, const p256_fe g)
 {
     uint64_t carry = add256(h, f, g);
 
     /* If carry or h >= p, subtract p */
     p256_fe tmp;
-    uint64_t borrow = sub256_v2(tmp, h, P256_P);
+    uint64_t borrow = sub256(tmp, h, P256_P);
 
     /* Use result if carry was set or no borrow */
     uint64_t use_sub = carry | (1 - borrow);
@@ -179,14 +231,12 @@ void p256_fe_add(p256_fe h, const p256_fe f, const p256_fe g)
 
 void p256_fe_sub(p256_fe h, const p256_fe f, const p256_fe g)
 {
-    uint64_t borrow = sub256_v2(h, f, g);
+    uint64_t borrow = sub256(h, f, g);
 
-    /* If borrow, add p */
-    if (borrow) {
-        p256_fe tmp;
-        add256(tmp, h, P256_P);
-        p256_fe_copy(h, tmp);
-    }
+    /* If the subtraction borrowed, add p back */
+    p256_fe tmp;
+    add256(tmp, h, P256_P);
+    p256_fe_cmov(h, tmp, borrow);
 }
 
 void p256_fe_neg(p256_fe h, const p256_fe f)
@@ -201,73 +251,15 @@ void p256_fe_neg(p256_fe h, const p256_fe f)
 /* ------------------------------------------------------------------ */
 
 /*
- * 256x256 -> 512-bit multiplication, then reduce mod p using
- * the NIST P-256 reduction identity.
- *
- * p = 2^256 - 2^224 + 2^192 + 2^96 - 1
- *
- * For a 512-bit product T = t7:t6:t5:t4:t3:t2:t1:t0 (32-bit words),
- * we apply the NIST reduction formulas. Here we work with 64-bit limbs
- * and adapt accordingly.
+ * 256x256 -> 512-bit multiplication, then reduce mod p using the
+ * Solinas reduction for the NIST prime (FIPS 186-4 Appendix D.2.3).
  */
-
 void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
 {
-    /* Full 512-bit product in 8 x 64-bit limbs */
     uint64_t t[8];
-    memset(t, 0, sizeof(t));
+    mul256(t, f, g);
 
-#ifdef __SIZEOF_INT128__
-    for (int i = 0; i < 4; i++) {
-        unsigned __int128 carry = 0;
-        for (int j = 0; j < 4; j++) {
-            carry += (unsigned __int128)f[i] * g[j] + t[i + j];
-            t[i + j] = (uint64_t)carry;
-            carry >>= 64;
-        }
-        t[i + 4] += (uint64_t)carry;
-    }
-#else
-    /* Portable 64x64 -> 128 schoolbook */
-    for (int i = 0; i < 4; i++) {
-        uint64_t carry = 0;
-        for (int j = 0; j < 4; j++) {
-            /* 64x64 -> 128 using 32-bit splits */
-            uint64_t a = f[i], b = g[j];
-            uint32_t a0 = (uint32_t)a, a1 = (uint32_t)(a >> 32);
-            uint32_t b0 = (uint32_t)b, b1 = (uint32_t)(b >> 32);
-            uint64_t p0 = (uint64_t)a0 * b0;
-            uint64_t p1 = (uint64_t)a0 * b1;
-            uint64_t p2 = (uint64_t)a1 * b0;
-            uint64_t p3 = (uint64_t)a1 * b1;
-
-            uint64_t lo = p0 + (p1 << 32) + (p2 << 32);
-            uint64_t hi = p3 + (p1 >> 32) + (p2 >> 32);
-            /* Carry correction for lo overflow */
-            if (lo < p0) hi++;
-            uint64_t mid = (p1 << 32) + (p2 << 32);
-            if (mid < (p1 << 32)) hi++;
-
-            /* Add to accumulator */
-            uint64_t prev = t[i + j];
-            lo += prev;
-            if (lo < prev) hi++;
-            lo += carry;
-            if (lo < carry) hi++;
-            t[i + j] = lo;
-            carry = hi;
-        }
-        t[i + 4] += carry;
-    }
-#endif
-
-    /*
-     * NIST P-256 reduction using the Solinas method.
-     * We split the 512-bit result into 32-bit words and apply the
-     * reduction formulas from FIPS 186-4 Appendix D.
-     *
-     * Split t[0..7] (64-bit) into c[0..15] (32-bit), little-endian.
-     */
+    /* Split t[0..7] (64-bit) into c[0..15] (32-bit), little-endian. */
     uint32_t c[16];
     for (int i = 0; i < 8; i++) {
         c[2 * i]     = (uint32_t)t[i];
@@ -275,16 +267,18 @@ void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
     }
 
     /*
-     * Per FIPS 186-4 D.2.3, the result is:
-     * T + S1 + S2 + S3 + S4 - D1 - D2 - D3 - D4 (mod p)
-     *
-     * Using 32-bit word notation c0..c15:
+     * The result is T + 2*S1 + 2*S2 + S3 + S4 - D1 - D2 - D3 - D4 (mod p),
+     * each term eight 32-bit words, written most significant first:
      *
      * T  = (c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0)
-     * S1 = (c15, c14, c13, c12, c11, 0,   0,   0)  * 2
-     * S2 = (0,   c15, c14, c13, c12, 0,   0,   0)  * 2... etc.
-     *
-     * Let's use the standard formulation with int64 accumulators.
+     * S1 = (c15, c14, c13, c12, c11, 0,   0,   0)
+     * S2 = (0,   c15, c14, c13, c12, 0,   0,   0)
+     * S3 = (c15, c14, 0,   0,   0,   c10, c9,  c8)
+     * S4 = (c8,  c13, c15, c14, c13, c11, c10, c9)
+     * D1 = (c10, c8,  0,   0,   0,   c13, c12, c11)
+     * D2 = (c11, c9,  0,   0,   c15, c14, c13, c12)
+     * D3 = (c12, 0,   c10, c9,  c8,  c15, c14, c13)
+     * D4 = (c13, 0,   c11, c10, c9,  0,   c15, c14)
      */
 
     int64_t s[8]; /* 32-bit word accumulators with room for carries */
@@ -299,27 +293,27 @@ void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
     s[6] = (int64_t)c[6];
     s[7] = (int64_t)c[7];
 
-    /* + 2*S1: S1 = (c15, c14, c13, c12, c11, 0, 0, 0) */
+    /* + 2*S1 */
     s[3] += 2 * (int64_t)c[11];
     s[4] += 2 * (int64_t)c[12];
     s[5] += 2 * (int64_t)c[13];
     s[6] += 2 * (int64_t)c[14];
     s[7] += 2 * (int64_t)c[15];
 
-    /* + 2*S2: S2 = (0, c15, c14, c13, c12, 0, 0, 0) */
+    /* + 2*S2 */
     s[3] += 2 * (int64_t)c[12];
     s[4] += 2 * (int64_t)c[13];
     s[5] += 2 * (int64_t)c[14];
     s[6] += 2 * (int64_t)c[15];
 
-    /* + S3: S3 = (c15, c14, 0, 0, 0, c10, c9, c8) */
+    /* + S3 */
     s[0] += (int64_t)c[8];
     s[1] += (int64_t)c[9];
     s[2] += (int64_t)c[10];
     s[6] += (int64_t)c[14];
     s[7] += (int64_t)c[15];
 
-    /* + S4: S4 = (c8, c13, c15, c14, c13, c11, c10, c9) */
+    /* + S4 */
     s[0] += (int64_t)c[9];
     s[1] += (int64_t)c[10];
     s[2] += (int64_t)c[11];
@@ -329,14 +323,14 @@ void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
     s[6] += (int64_t)c[13];
     s[7] += (int64_t)c[8];
 
-    /* - D1: D1 = (c10, c8, 0, 0, 0, c13, c12, c11) */
+    /* - D1 */
     s[0] -= (int64_t)c[11];
     s[1] -= (int64_t)c[12];
     s[2] -= (int64_t)c[13];
     s[6] -= (int64_t)c[8];
     s[7] -= (int64_t)c[10];
 
-    /* - D2: D2 = (c11, c9, 0, 0, c15, c14, c13, c12) */
+    /* - D2 */
     s[0] -= (int64_t)c[12];
     s[1] -= (int64_t)c[13];
     s[2] -= (int64_t)c[14];
@@ -344,7 +338,7 @@ void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
     s[6] -= (int64_t)c[9];
     s[7] -= (int64_t)c[11];
 
-    /* - D3: D3 = (c12, 0, c10, c9, c8, c15, c14, c13) */
+    /* - D3 */
     s[0] -= (int64_t)c[13];
     s[1] -= (int64_t)c[14];
     s[2] -= (int64_t)c[15];
@@ -353,7 +347,7 @@ void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
     s[5] -= (int64_t)c[10];
     s[7] -= (int64_t)c[12];
 
-    /* - D4: D4 = (c13, 0, c11, c10, c9, 0, c15, c14) */
+    /* - D4 */
     s[0] -= (int64_t)c[14];
     s[1] -= (int64_t)c[15];
     s[3] -= (int64_t)c[9];
@@ -361,45 +355,48 @@ void p256_fe_mul(p256_fe h, const p256_fe f, const p256_fe g)
     s[5] -= (int64_t)c[11];
     s[7] -= (int64_t)c[13];
 
-    /* Propagate carries through 32-bit words */
-    int64_t carry;
-    for (int i = 0; i < 7; i++) {
-        carry = s[i] >> 32;
-        s[i] &= 0xFFFFFFFF;
-        s[i + 1] += carry;
-    }
-    carry = s[7] >> 32;
-    s[7] &= 0xFFFFFFFF;
-
-    /* Handle remaining carry: multiply by (2^256 mod p) and add back */
-    /* 2^256 mod p = 2^224 - 2^192 - 2^96 + 1 */
-    s[0] += carry;
-    s[3] -= carry;     /* -2^96 * carry (in 32-bit word 3) */
-    s[6] -= carry;     /* -2^192 * carry */
-    s[7] += carry;     /* +2^224 * carry */
-
-    /* Another round of carry propagation */
-    for (int i = 0; i < 7; i++) {
-        carry = s[i] >> 32;
-        s[i] &= 0xFFFFFFFF;
-        if (s[i] < 0) {
-            s[i] += (int64_t)1 << 32;
-            carry--;
+    /*
+     * Carry through the 32-bit words, then fold whatever is left above
+     * bit 255 back in using 2^256 = 2^224 - 2^192 - 2^96 + 1 (mod p).
+     *
+     * The first pass leaves a carry of at most a few units in either
+     * direction. Folding it moves the value by less than 2^228, so the
+     * second pass can leave a carry of -1, 0 or +1, and folding that
+     * cannot produce another: after a +1 the low 256 bits are below
+     * 2^228, and after a -1 they are within 2^228 of 2^256. Three passes
+     * therefore always end with a zero carry.
+     *
+     * (This previously stopped after the second pass and discarded its
+     * carry, which gave a result off by a multiple of 2^256 for about
+     * one random operand pair in 2^32, and far more often for operands
+     * with runs of zero or one bits.)
+     */
+    for (int pass = 0; pass < 3; pass++) {
+        int64_t carry = 0;
+        for (int i = 0; i < 8; i++) {
+            s[i] += carry;
+            /* floor division by 2^32, without shifting a negative value */
+            carry = (s[i] - (s[i] & 0xFFFFFFFFLL)) / 4294967296LL;
+            s[i] &= 0xFFFFFFFFLL;
         }
-        s[i + 1] += carry;
+        s[0] += carry;
+        s[3] -= carry;     /* -2^96 */
+        s[6] -= carry;     /* -2^192 */
+        s[7] += carry;     /* +2^224 */
     }
+    /*
+     * The last pass had a zero carry out, so the fold above added
+     * nothing and every s[i] is a clean 32-bit word.
+     */
 
-    /* Handle negative values by adding multiples of p */
-    /* Reconstruct as 64-bit limbs */
-    h[0] = ((uint64_t)(uint32_t)s[0]) | (((uint64_t)(uint32_t)s[1]) << 32);
-    h[1] = ((uint64_t)(uint32_t)s[2]) | (((uint64_t)(uint32_t)s[3]) << 32);
-    h[2] = ((uint64_t)(uint32_t)s[4]) | (((uint64_t)(uint32_t)s[5]) << 32);
-    h[3] = ((uint64_t)(uint32_t)s[6]) | (((uint64_t)(uint32_t)s[7]) << 32);
+    h[0] = (uint64_t)s[0] | ((uint64_t)s[1] << 32);
+    h[1] = (uint64_t)s[2] | ((uint64_t)s[3] << 32);
+    h[2] = (uint64_t)s[4] | ((uint64_t)s[5] << 32);
+    h[3] = (uint64_t)s[6] | ((uint64_t)s[7] << 32);
 
-    /* Final reduction: subtract p if h >= p */
+    /* The value is now below 2^256 < 2p: subtract p once if h >= p */
     p256_fe tmp;
-    uint64_t borrow = sub256_v2(tmp, h, P256_P);
-    /* If no borrow, h >= p, use tmp */
+    uint64_t borrow = sub256(tmp, h, P256_P);
     p256_fe_cmov(h, tmp, 1 - borrow);
 }
 
@@ -415,99 +412,22 @@ void p256_fe_sq(p256_fe h, const p256_fe f)
 void p256_fe_inv(p256_fe h, const p256_fe f)
 {
     /*
-     * p-2 for P-256 has a nice addition-chain structure.
-     * We use a simple square-and-multiply approach.
-     * p - 2 = FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFD
+     * Square-and-multiply over the bits of
+     * p - 2 = FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFD.
+     * The exponent is public, so branching on its bits leaks nothing.
      */
-    p256_fe t, t2;
-    int i;
-
-    /* t = f^2 */
-    p256_fe_sq(t, f);
-    /* t = f^3 */
-    p256_fe_mul(t, t, f);
-    /* t2 = f^(2^2 - 1) = f^3 */
-    p256_fe_copy(t2, t);
-    /* Build up f^(2^32 - 1) */
-    for (i = 0; i < 2; i++) { p256_fe_sq(t, t); } p256_fe_mul(t, t, t2);
-    p256_fe_copy(t2, t);
-    for (i = 0; i < 4; i++) { p256_fe_sq(t, t); } p256_fe_mul(t, t, t2);
-    p256_fe_copy(t2, t);
-    for (i = 0; i < 8; i++) { p256_fe_sq(t, t); } p256_fe_mul(t, t, t2);
-    p256_fe_copy(t2, t);
-    for (i = 0; i < 16; i++) { p256_fe_sq(t, t); } p256_fe_mul(t, t, t2);
-
-    /* Now t = f^(2^32 - 1) */
-    p256_fe x32;
-    p256_fe_copy(x32, t);
-
-    /* Square 32 more times and multiply */
-    for (i = 0; i < 32; i++) p256_fe_sq(t, t);
-    p256_fe_mul(t, t, f);  /* * f for the "01" at the end of the first 64-bit block */
-
-    /* Continue building the exponent p-2 */
-    for (i = 0; i < 32; i++) p256_fe_sq(t, t);
-    /* middle 32 bits of p-2 second limb are 0, just multiply by 1 */
-
-    for (i = 0; i < 32; i++) p256_fe_sq(t, t);
-
-    for (i = 0; i < 32; i++) p256_fe_sq(t, t);
-
-    /* Now we need the bottom 96 bits: FFFFFFFFFFFFFFFFFFFFFFFD */
-    p256_fe_mul(t, t, x32); /* 0xFFFFFFFF */
-    for (i = 0; i < 32; i++) p256_fe_sq(t, t);
-    p256_fe_mul(t, t, x32);
-    for (i = 0; i < 32; i++) p256_fe_sq(t, t);
-
-    /* last 32 bits: FFFFFFFD = 2^32 - 3 */
-    /* f^(2^32 - 3) = f^(2^32 - 1) * f^(-2) -- nah, just do binary exp for last word */
-    /* Build 0xFFFFFFFD */
-    p256_fe last;
-    p256_fe_copy(last, x32); /* f^(2^32 - 1) */
-    /* We need f^(0xFFFFFFFD) = f^(2^32 - 3) */
-    /* = f^(2^32 - 1) / f^2 = x32 * inv(f^2)... too complex */
-    /* Instead: direct approach for the last limb */
-    /* f^(FFFFFFFD) = f^(FFFFFFFF) * f^(-2) -- not helpful without div */
-    /* Better: rebuild. FFFFFFFD = 11111111111111111111111111111101 binary */
-    /* = 2^32 - 3 */
-    p256_fe_sq(last, f);     /* f^2 */
-    p256_fe_mul(last, last, f); /* f^3 */
-    /* f^(2^k - 1) via repeated sq+mul */
-    p256_fe acc;
-    p256_fe_copy(acc, last); /* f^3 = f^(2^2-1) */
-    for (i = 0; i < 2; i++) p256_fe_sq(acc, acc);
-    p256_fe_mul(acc, acc, last); /* f^(2^4 - 1) */
-    p256_fe_copy(last, acc);
-    for (i = 0; i < 4; i++) p256_fe_sq(acc, acc);
-    p256_fe_mul(acc, acc, last); /* f^(2^8 - 1) */
-    p256_fe_copy(last, acc);
-    for (i = 0; i < 8; i++) p256_fe_sq(acc, acc);
-    p256_fe_mul(acc, acc, last); /* f^(2^16 - 1) */
-    p256_fe_copy(last, acc);
-    for (i = 0; i < 16; i++) p256_fe_sq(acc, acc);
-    p256_fe_mul(acc, acc, last); /* f^(2^32 - 1) */
-
-    /* Now acc = f^(2^32-1). We need f^(2^32-3) = acc * f^(-2).
-     * Instead, compute differently: sq once to get f^(2*(2^32-1))
-     * and adjust. Actually let's just do it the simple way with the full
-     * binary expansion of p-2.
-     */
-
-    /* Restart with a clean binary method for p-2 */
-    /* p-2 in binary: 256 bits */
     uint8_t exp[32];
     p256_fe_tobytes(exp, P256_P);
-    /* Subtract 2 from the big-endian representation */
-    exp[31] -= 2;  /* p ends in ...FFFFFFFF, so -2 gives ...FFFFFFFD */
+    exp[31] -= 2;  /* p ends in ...FF, so no borrow */
 
-    /* Square-and-multiply from MSB */
-    p256_fe result;
+    p256_fe result, base;
+    p256_fe_copy(base, f);     /* h may alias f */
     p256_fe_one(result);
-    for (i = 0; i < 256; i++) {
+    for (int i = 0; i < 256; i++) {
         p256_fe_sq(result, result);
         int bit = (exp[i / 8] >> (7 - (i & 7))) & 1;
         if (bit)
-            p256_fe_mul(result, result, f);
+            p256_fe_mul(result, result, base);
     }
 
     p256_fe_copy(h, result);
@@ -527,143 +447,92 @@ void p256_scalar_tobytes(uint8_t s[32], const p256_fe h)
     p256_fe_tobytes(s, h);
 }
 
-static uint64_t add256_mod(p256_fe r, const p256_fe a, const p256_fe b,
-                            const p256_fe mod)
+/* h = h mod n for any 256-bit h. n > 2^255, so one subtraction is enough. */
+void p256_scalar_reduce(p256_fe h)
 {
-    uint64_t carry = add256(r, a, b);
     p256_fe tmp;
-    uint64_t borrow = sub256_v2(tmp, r, mod);
-    uint64_t use_sub = carry | (1 - borrow);
-    p256_fe_cmov(r, tmp, use_sub);
-    return 0;
+    uint64_t borrow = sub256(tmp, h, P256_N);
+    p256_fe_cmov(h, tmp, 1 - borrow);
 }
 
+/* Both operands must be below n; so is the result. */
 void p256_scalar_add(p256_fe h, const p256_fe f, const p256_fe g)
 {
-    add256_mod(h, f, g, P256_N);
+    uint64_t carry = add256(h, f, g);
+    p256_fe tmp;
+    uint64_t borrow = sub256(tmp, h, P256_N);
+    p256_fe_cmov(h, tmp, carry | (1 - borrow));
 }
 
+/*
+ * h = f * g mod n.
+ *
+ * The 512-bit product is reduced by folding its upper half down:
+ * 2^256 = C (mod n) with C = 2^256 - n < 2^224, so
+ *
+ *     hi * 2^256 + lo  =  hi * C + lo   (mod n)
+ *
+ * and each fold shortens the value by 32 bits. Starting from 512 bits,
+ * eight folds bring it below 2^258, a ninth below 2^256 + 2^226, and a
+ * tenth below 2^256, after which one conditional subtraction of n
+ * finishes. The fold count is fixed, so the running time does not depend
+ * on the operands.
+ *
+ * (The previous version kept only the low 256 bits of the product and
+ * subtracted n from that a few times, which is not a reduction mod n at
+ * all; every ECDSA value computed with it was wrong.)
+ */
 void p256_scalar_mul(p256_fe h, const p256_fe f, const p256_fe g)
 {
-    /* Full 512-bit product, then reduce mod n */
+    /* C = 2^256 - n */
+    static const p256_fe C = {
+        0x0C46353D039CDAAFULL,
+        0x4319055258E8617BULL,
+        0x0000000000000000ULL,
+        0x00000000FFFFFFFFULL,
+    };
     uint64_t t[8];
-    memset(t, 0, sizeof(t));
 
-#ifdef __SIZEOF_INT128__
-    for (int i = 0; i < 4; i++) {
-        unsigned __int128 carry = 0;
-        for (int j = 0; j < 4; j++) {
-            carry += (unsigned __int128)f[i] * g[j] + t[i + j];
-            t[i + j] = (uint64_t)carry;
-            carry >>= 64;
+    mul256(t, f, g);
+
+    for (int fold = 0; fold < 10; fold++) {
+        uint64_t prod[8];
+        p256_fe lo = { t[0], t[1], t[2], t[3] };
+        p256_fe hi = { t[4], t[5], t[6], t[7] };
+
+        mul256(prod, hi, C);
+
+        /* t = prod + lo; cannot overflow 512 bits, prod < 2^480 */
+        uint64_t carry = add256(t, prod, lo);
+        for (int i = 4; i < 8; i++) {
+            t[i] = prod[i] + carry;
+            carry = (t[i] < carry);
         }
-        t[i + 4] += (uint64_t)carry;
-    }
-#else
-    for (int i = 0; i < 4; i++) {
-        uint64_t carry = 0;
-        for (int j = 0; j < 4; j++) {
-            uint64_t a = f[i], b = g[j];
-            uint32_t a0 = (uint32_t)a, a1 = (uint32_t)(a >> 32);
-            uint32_t b0 = (uint32_t)b, b1 = (uint32_t)(b >> 32);
-            uint64_t p0 = (uint64_t)a0 * b0;
-            uint64_t p1 = (uint64_t)a0 * b1;
-            uint64_t p2 = (uint64_t)a1 * b0;
-            uint64_t p3 = (uint64_t)a1 * b1;
-            uint64_t lo = p0 + (p1 << 32) + (p2 << 32);
-            uint64_t hi = p3 + (p1 >> 32) + (p2 >> 32);
-            if (lo < p0) hi++;
-            uint64_t prev = t[i + j];
-            lo += prev; if (lo < prev) hi++;
-            lo += carry; if (lo < carry) hi++;
-            t[i + j] = lo;
-            carry = hi;
-        }
-        t[i + 4] += carry;
-    }
-#endif
-
-    /* Barrett reduction mod n.
-     * Simplified: repeatedly subtract n from the result.
-     * For a proper implementation, use Barrett or Montgomery.
-     * Here we do a simple shift-and-subtract loop.
-     */
-    /* We have a 512-bit number in t[0..7]. Reduce mod n (256-bit). */
-    /* Simple approach: work with the top half, multiply by (2^256 mod n), add to bottom */
-
-    /* Reduce: result = t[0..3] + t[4..7] * (2^256 mod n) */
-    p256_fe lo_part = { t[0], t[1], t[2], t[3] };
-
-    /* Use binary long division / repeated subtraction approach */
-    /* Copy 512-bit number into a working buffer */
-    p256_fe_copy(h, lo_part);
-    uint64_t work[8];
-    memcpy(work, t, sizeof(work));
-
-    /* Subtract n from the top until < 2^256 */
-    while (work[7] || work[6] || work[5] || work[4]) {
-        /* Subtract n << appropriate shift */
-        /* Simple: subtract n from work[4..7], carry into work[0..3] */
-        uint64_t borrow = 0;
-        for (int i = 0; i < 4; i++) {
-#ifdef __SIZEOF_INT128__
-            unsigned __int128 diff = (unsigned __int128)work[i + 4] - P256_N[i] - borrow;
-            work[i + 4] = (uint64_t)diff;
-            borrow = (uint64_t)(diff >> 127) & 1;
-#else
-            uint64_t lo = work[i + 4] - P256_N[i];
-            uint64_t br1 = (lo > work[i + 4]) ? 1 : 0;
-            uint64_t lo2 = lo - borrow;
-            uint64_t br2 = (lo2 > lo) ? 1 : 0;
-            work[i + 4] = lo2;
-            borrow = br1 | br2;
-#endif
-        }
-        /* Add the remainder back to the low part */
-        /* Actually, what we're computing is:
-         * work = work - n * 2^256
-         * But that gives work[0..3] + (work[4..7] - n) * 2^256
-         * We need: work mod n = (work[0..3] + work[4..7] * 2^256) mod n
-         * = work[0..3] + work[4..7] * (2^256 mod n) mod n
-         */
-        /* This simple approach doesn't work well. Let's just do repeated subtraction. */
-        break;
     }
 
-    /* Final reduction of the lower 256 bits */
-    h[0] = work[0]; h[1] = work[1]; h[2] = work[2]; h[3] = work[3];
-
-    /* Subtract n while h >= n */
-    for (int iter = 0; iter < 10; iter++) {
-        p256_fe tmp;
-        uint64_t borrow = sub256_v2(tmp, h, P256_N);
-        if (borrow) break;
-        p256_fe_copy(h, tmp);
-    }
+    /* t[4..7] are zero now */
+    h[0] = t[0]; h[1] = t[1]; h[2] = t[2]; h[3] = t[3];
+    p256_scalar_reduce(h);
 }
 
 void p256_scalar_inv(p256_fe h, const p256_fe f)
 {
-    /* Fermat's little theorem: f^(n-2) mod n */
+    /*
+     * Fermat's little theorem: f^(n-2) mod n. The exponent is public;
+     * the base is the secret, and every step is a p256_scalar_mul.
+     */
     uint8_t exp[32];
     p256_fe_tobytes(exp, P256_N);
-    exp[31] -= 2;
+    exp[31] -= 2;  /* n ends in ...51, so no borrow */
 
-    p256_fe result;
-    p256_fe_one(result);
-    for (int i = 0; i < 256; i++) {
-        p256_fe_sq(result, result);
-        /* Oops, this squares mod p, not mod n. We need mod n arithmetic. */
-        /* For scalar inversion, use scalar_mul. */
-    }
-
-    /* Redo with scalar_mul */
+    p256_fe result, base;
+    p256_fe_copy(base, f);     /* h may alias f */
     p256_fe_one(result);
     for (int i = 0; i < 256; i++) {
         p256_scalar_mul(result, result, result);
         int bit = (exp[i / 8] >> (7 - (i & 7))) & 1;
         if (bit)
-            p256_scalar_mul(result, result, f);
+            p256_scalar_mul(result, result, base);
     }
 
     p256_fe_copy(h, result);
@@ -697,6 +566,11 @@ int p256_point_is_zero(const p256_point *p)
  * X' = M^2 - 2*S
  * Y' = M*(S - X') - 8*Y^4
  * Z' = 2*Y*Z
+ *
+ * r may alias p, which is how p256_point_scalar_mult() calls it. The
+ * outputs are therefore computed into locals and stored at the end;
+ * writing r->Y before reading p->Y for Z' used the new Y in place of
+ * the old one and broke every scalar multiplication.
  */
 void p256_point_double(p256_point *r, const p256_point *p)
 {
@@ -705,7 +579,7 @@ void p256_point_double(p256_point *r, const p256_point *p)
         return;
     }
 
-    p256_fe M, S, T, Y2, Z2, tmp;
+    p256_fe M, S, T, Y2, Z2, tmp, X3, Y3, Z3;
 
     p256_fe_sq(Z2, p->Z);        /* Z^2 */
     p256_fe_add(tmp, p->X, Z2);  /* X + Z^2 */
@@ -722,41 +596,44 @@ void p256_point_double(p256_point *r, const p256_point *p)
     p256_fe_add(S, S, S);         /* S = 4*X*Y^2 */
 
     p256_fe_sq(T, M3);            /* M^2 */
-    p256_fe_sub(r->X, T, S);
-    p256_fe_sub(r->X, r->X, S);  /* X' = M^2 - 2*S */
+    p256_fe_sub(X3, T, S);
+    p256_fe_sub(X3, X3, S);       /* X' = M^2 - 2*S */
 
-    p256_fe_sub(tmp, S, r->X);   /* S - X' */
+    p256_fe_sub(tmp, S, X3);      /* S - X' */
     p256_fe_mul(tmp, M3, tmp);    /* M * (S - X') */
     p256_fe_sq(Y2, Y2);           /* Y^4 */
     p256_fe_add(Y2, Y2, Y2);
     p256_fe_add(Y2, Y2, Y2);
     p256_fe_add(Y2, Y2, Y2);     /* 8*Y^4 */
-    p256_fe_sub(r->Y, tmp, Y2);  /* Y' = M*(S-X') - 8*Y^4 */
+    p256_fe_sub(Y3, tmp, Y2);    /* Y' = M*(S-X') - 8*Y^4 */
 
-    p256_fe_mul(r->Z, p->Y, p->Z);
-    p256_fe_add(r->Z, r->Z, r->Z); /* Z' = 2*Y*Z */
+    p256_fe_mul(Z3, p->Y, p->Z);
+    p256_fe_add(Z3, Z3, Z3);     /* Z' = 2*Y*Z */
+
+    p256_fe_copy(r->X, X3);
+    p256_fe_copy(r->Y, Y3);
+    p256_fe_copy(r->Z, Z3);
 }
 
 /*
  * Point addition in Jacobian coordinates.
  * Uses the standard formulas for mixed/full Jacobian addition.
+ * r may alias p or q.
  */
 void p256_point_add(p256_point *r, const p256_point *p, const p256_point *q)
 {
     if (p256_point_is_zero(p)) {
-        p256_fe_copy(r->X, q->X);
-        p256_fe_copy(r->Y, q->Y);
-        p256_fe_copy(r->Z, q->Z);
+        p256_point t = *q;
+        *r = t;
         return;
     }
     if (p256_point_is_zero(q)) {
-        p256_fe_copy(r->X, p->X);
-        p256_fe_copy(r->Y, p->Y);
-        p256_fe_copy(r->Z, p->Z);
+        p256_point t = *p;
+        *r = t;
         return;
     }
 
-    p256_fe U1, U2, S1, S2, H, R_val, HH, HHH, V;
+    p256_fe U1, U2, S1, S2, H, R_val, HH, HHH, V, X3, Y3, Z3;
 
     p256_fe Z1sq, Z2sq;
     p256_fe_sq(Z1sq, p->Z);
@@ -793,44 +670,54 @@ void p256_point_add(p256_point *r, const p256_point *p, const p256_point *q)
     p256_fe_mul(V, U1, HH);          /* V = U1 * H^2 */
 
     /* X3 = R^2 - H^3 - 2*V */
-    p256_fe_sq(r->X, R_val);
-    p256_fe_sub(r->X, r->X, HHH);
+    p256_fe_sq(X3, R_val);
+    p256_fe_sub(X3, X3, HHH);
     p256_fe tmp;
     p256_fe_add(tmp, V, V);
-    p256_fe_sub(r->X, r->X, tmp);
+    p256_fe_sub(X3, X3, tmp);
 
     /* Y3 = R*(V - X3) - S1*H^3 */
-    p256_fe_sub(tmp, V, r->X);
-    p256_fe_mul(r->Y, R_val, tmp);
+    p256_fe_sub(tmp, V, X3);
+    p256_fe_mul(Y3, R_val, tmp);
     p256_fe_mul(tmp, S1, HHH);
-    p256_fe_sub(r->Y, r->Y, tmp);
+    p256_fe_sub(Y3, Y3, tmp);
 
     /* Z3 = Z1*Z2*H */
-    p256_fe_mul(r->Z, p->Z, q->Z);
-    p256_fe_mul(r->Z, r->Z, H);
+    p256_fe_mul(Z3, p->Z, q->Z);
+    p256_fe_mul(Z3, Z3, H);
+
+    p256_fe_copy(r->X, X3);
+    p256_fe_copy(r->Y, Y3);
+    p256_fe_copy(r->Z, Z3);
 }
 
 /* ------------------------------------------------------------------ */
 /* Scalar multiplication: double-and-add                                */
 /* ------------------------------------------------------------------ */
 
+/*
+ * NOTE: not constant time. The addition is skipped for zero bits of k,
+ * and p256_point_add()/p256_point_double() branch on special cases, so
+ * the running time depends on the scalar. k is a secret in ECDH and in
+ * ECDSA signing. Hardening this (a fixed-window ladder with complete
+ * formulas) is tracked separately; it does not affect the results.
+ */
 void p256_point_scalar_mult(p256_point *r, const uint8_t k[32],
                              const p256_point *p)
 {
-    p256_point_zero(r);
-    p256_point R_tmp;
+    p256_point acc, base = *p;      /* r may alias p */
+
+    p256_point_zero(&acc);
 
     for (int i = 0; i < 256; i++) {
-        p256_point_double(r, r);
+        p256_point_double(&acc, &acc);
 
         int bit = (k[i / 8] >> (7 - (i & 7))) & 1;
-        if (bit) {
-            p256_point_add(&R_tmp, r, p);
-            p256_fe_copy(r->X, R_tmp.X);
-            p256_fe_copy(r->Y, R_tmp.Y);
-            p256_fe_copy(r->Z, R_tmp.Z);
-        }
+        if (bit)
+            p256_point_add(&acc, &acc, &base);
     }
+
+    *r = acc;
 }
 
 void p256_point_scalar_mult_base(p256_point *r, const uint8_t k[32])
@@ -847,6 +734,7 @@ void p256_point_scalar_mult_base(p256_point *r, const uint8_t k[32])
 /* Point encoding/decoding (uncompressed, 04 || X || Y)                 */
 /* ------------------------------------------------------------------ */
 
+/* p must not be the point at infinity (the result would be (0, 0)). */
 void p256_point_to_affine(uint8_t x[32], uint8_t y[32], const p256_point *p)
 {
     p256_fe z_inv, z_inv2, z_inv3;
@@ -878,6 +766,14 @@ int p256_point_decode(p256_point *p, const uint8_t in[65])
     p256_fe_frombytes(p->X, in + 1);
     p256_fe_frombytes(p->Y, in + 33);
     p256_fe_one(p->Z);
+
+    /*
+     * Coordinates must be field elements. The arithmetic below assumes
+     * operands below p, so an out-of-range coordinate has to be rejected
+     * here rather than left for the curve equation to catch.
+     */
+    if (p256_fe_cmp(p->X, P256_P) >= 0 || p256_fe_cmp(p->Y, P256_P) >= 0)
+        return -1;
 
     /* Verify point is on curve: y^2 = x^3 + ax + b */
     /* a = -3, b = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B */
