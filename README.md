@@ -846,6 +846,11 @@ What CI checks today:
 - ML-KEM against NIST's ACVP vectors for FIPS 203: key generation,
   encapsulation, decapsulation (including implicit rejection) and the
   required input checks, 240 tests (`tests/kat/`)
+- ML-DSA and SLH-DSA against NIST's ACVP vectors for FIPS 204 and 205:
+  key generation, deterministic and hedged signing, and verification
+  through the pure external interface with context strings (210 and 344
+  tests; SLH-DSA verification for the 128-bit parameter sets only, to
+  keep the repository small)
 - BIKE against all 300 official round 4 known-answer vectors
   (`tests/kat/`)
 - Published test vectors for the hash layer (FIPS 180-4, FIPS 202,
@@ -861,8 +866,10 @@ What CI checks today:
   run with a corpus kept between runs
 
 Not yet in place: known-answer vectors for the other post-quantum
-algorithms. ML-DSA and SLH-DSA are checked against OpenSSL in CI instead,
-not against NIST's vectors.
+algorithms; HashML-DSA and HashSLH-DSA (pre-hash signing), which the
+library does not implement; and the internal and external-mu interfaces,
+which it does not expose. ACVP vectors for those exist and are counted,
+unconverted, in the vector files' headers.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 

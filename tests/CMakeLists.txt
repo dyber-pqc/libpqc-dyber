@@ -73,6 +73,30 @@ if(PQC_ENABLE_KEM_MLKEM)
         TIMEOUT 300 LABELS kat SKIP_RETURN_CODE 77)
 endif()
 
+# ML-DSA and SLH-DSA against NIST's ACVP vectors (tests/kat/test_kat_sig_acvp.c).
+if(PQC_ENABLE_SIG_MLDSA OR PQC_ENABLE_SIG_SLHDSA)
+    add_executable(test_kat_sig_acvp kat/test_kat_sig_acvp.c)
+    target_link_libraries(test_kat_sig_acvp PRIVATE pqc_static)
+    target_include_directories(test_kat_sig_acvp PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+endif()
+if(PQC_ENABLE_SIG_MLDSA)
+    add_test(NAME test_kat_mldsa
+             COMMAND test_kat_sig_acvp ${CMAKE_CURRENT_SOURCE_DIR}/kat/mldsa_acvp.txt)
+    set_tests_properties(test_kat_mldsa PROPERTIES
+        TIMEOUT 600 LABELS kat SKIP_RETURN_CODE 77)
+endif()
+if(PQC_ENABLE_SIG_SLHDSA)
+    # One signing vector per parameter set here: all 168 take minutes even
+    # optimised. The CI known-answer job runs the full set (ci.yml).
+    add_test(NAME test_kat_slhdsa
+             COMMAND test_kat_sig_acvp --sample 1
+                     ${CMAKE_CURRENT_SOURCE_DIR}/kat/slhdsa_acvp.txt)
+    set_tests_properties(test_kat_slhdsa PROPERTIES
+        TIMEOUT 1800 LABELS kat SKIP_RETURN_CODE 77)
+endif()
+
 # Security audit regression tests.
 # Needs the internal source tree for the address/parameter invariants.
 add_executable(test_security_audit unit/test_security_audit.c)
