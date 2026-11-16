@@ -26,6 +26,8 @@
 #include "core/kem/mlkem/indcpa.h"
 #include "core/kem/mlkem/verify.h"
 #include "core/common/hash/sha3.h"
+#include "core/common/ct_check.h"
+#include "pqc/common.h"
 #include "pqc/rand.h"
 
 /* ================================================================= */
@@ -137,6 +139,48 @@ pqc_status_t pqc_mlkem_keygen(const pqc_mlkem_params_t *params,
 }
 
 /* ================================================================= */
+/*  Input checks (FIPS 203, sections 7.2 and 7.3)                      */
+/* ================================================================= */
+
+/*
+ * Modulus check (7.2): ek must equal ByteEncode12(ByteDecode12(ek)), i.e.
+ * every 12-bit coefficient of t-hat is below q. The encoding packs two
+ * coefficients into three bytes. ek is public, so this may branch.
+ * Returns 1 if ek passes.
+ */
+static int mlkem_ek_modulus_ok(const uint8_t *pk,
+                               const pqc_mlkem_params_t *params)
+{
+    size_t i;
+    for (i = 0; i + 3 <= params->polyvec_bytes; i += 3) {
+        uint16_t a = (uint16_t)(pk[i] | ((uint16_t)(pk[i + 1] & 0x0F) << 8));
+        uint16_t b = (uint16_t)((pk[i + 1] >> 4) | ((uint16_t)pk[i + 2] << 4));
+        if (a >= PQC_MLKEM_Q || b >= PQC_MLKEM_Q)
+            return 0;
+    }
+    return 1;
+}
+
+/*
+ * Hash check (7.3): the H(ek) stored in dk must be the hash of the ek
+ * stored in dk. Compared in constant time; only the outcome is
+ * declassified, for the constant-time check -- it is a property of the
+ * key alone, independent of any ciphertext, and a key from our own key
+ * generation always passes. Returns 1 if dk passes.
+ */
+static int mlkem_dk_hash_ok(const uint8_t *sk,
+                            const pqc_mlkem_params_t *params)
+{
+    uint8_t h[PQC_MLKEM_SYMBYTES];
+    int ok;
+    pqc_sha3_256(h, sk + params->indcpa_sk_bytes, params->pk_bytes);
+    ok = pqc_memcmp_ct(h, sk + params->sk_bytes - 2 * PQC_MLKEM_SYMBYTES,
+                       PQC_MLKEM_SYMBYTES) == 0;
+    PQC_CT_DECLASSIFY(&ok, sizeof ok);
+    return ok;
+}
+
+/* ================================================================= */
 /*  ML-KEM.Encaps_internal (Algorithm 17)                              */
 /* ================================================================= */
 
@@ -160,6 +204,12 @@ pqc_status_t pqc_mlkem_encaps(const pqc_mlkem_params_t *params,
 
     if (!params || !ct || !ss || !pk) {
         return PQC_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* FIPS 203 7.2: until 0.3.0 this was not checked, so an ek with a
+     * coefficient >= q was used as if reduced. */
+    if (!mlkem_ek_modulus_ok(pk, params)) {
+        return PQC_ERROR_INVALID_KEY;
     }
 
     /* Generate random m */
@@ -211,6 +261,12 @@ pqc_status_t pqc_mlkem_decaps(const pqc_mlkem_params_t *params,
 
     if (!params || !ss || !ct || !sk) {
         return PQC_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* FIPS 203 7.3: until 0.3.0 this was not checked, so a dk whose ek
+     * and stored H(ek) disagreed was used anyway. */
+    if (!mlkem_dk_hash_ok(sk, params)) {
+        return PQC_ERROR_INVALID_KEY;
     }
 
     pk = sk + params->indcpa_sk_bytes;

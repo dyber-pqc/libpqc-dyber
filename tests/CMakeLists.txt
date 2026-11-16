@@ -60,6 +60,19 @@ if(PQC_ENABLE_KEM_BIKE)
     set_tests_properties(test_kat_bike PROPERTIES TIMEOUT 1800 LABELS kat)
 endif()
 
+# ML-KEM against NIST's ACVP vectors (see tests/kat/test_kat_mlkem.c).
+if(PQC_ENABLE_KEM_MLKEM)
+    add_executable(test_kat_mlkem kat/test_kat_mlkem.c)
+    target_link_libraries(test_kat_mlkem PRIVATE pqc_static)
+    target_include_directories(test_kat_mlkem PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME test_kat_mlkem
+             COMMAND test_kat_mlkem ${CMAKE_CURRENT_SOURCE_DIR}/kat/mlkem_acvp.txt)
+    set_tests_properties(test_kat_mlkem PROPERTIES
+        TIMEOUT 300 LABELS kat SKIP_RETURN_CODE 77)
+endif()
+
 # Security audit regression tests.
 # Needs the internal source tree for the address/parameter invariants.
 add_executable(test_security_audit unit/test_security_audit.c)

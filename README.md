@@ -843,6 +843,9 @@ What CI checks today:
 
 - Interoperability of ML-DSA and SLH-DSA with OpenSSL 3.5, in both
   directions, for every parameter set
+- ML-KEM against NIST's ACVP vectors for FIPS 203: key generation,
+  encapsulation, decapsulation (including implicit rejection) and the
+  required input checks, 240 tests (`tests/kat/`)
 - BIKE against all 300 official round 4 known-answer vectors
   (`tests/kat/`)
 - Published test vectors for the hash layer (FIPS 180-4, FIPS 202,
@@ -858,10 +861,8 @@ What CI checks today:
   run with a corpus kept between runs
 
 Not yet in place: known-answer vectors for the other post-quantum
-algorithms, ML-KEM included. ML-DSA and SLH-DSA are checked against
-OpenSSL in CI instead; ML-KEM was compared byte for byte with
-@noble/post-quantum and OpenSSL once, during the 0.2.1 work (see
-CHANGELOG), but no such check runs in CI.
+algorithms. ML-DSA and SLH-DSA are checked against OpenSSL in CI instead,
+not against NIST's vectors.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
