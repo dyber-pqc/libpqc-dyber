@@ -266,34 +266,43 @@ jobs:
             --error-exitcode=1 \
             ./build/tests/test_hash
 
+  # Constant-time check (ctgrind): the library's RNG output is marked
+  # undefined, so memcheck reports every branch and memory index derived
+  # from secrets. See tests/ct/test_ct.c. Blocking for the algorithms in
+  # tests/ct/ct_gate.txt; the full report runs weekly in security.yml.
   constant-time:
-    name: Constant-Time Verification
+    name: Constant-Time Verification (ctgrind)
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
-      - name: Build with CT instrumentation
-        # -O1 for the same reason as the Valgrind job above: at -O0 this
-        # exceeded the one-hour ceiling and was killed.
+      - name: Build
+        # -O2: the optimised code is what ships, and what the compiler
+        # emits at -O2 is what has to be free of secret-dependent branches.
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DPQC_BUILD_TESTS=ON \
-            -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1 -g -O1"
-          cmake --build build
-      - name: Run constant-time checks
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g" \
+            -DPQC_ENABLE_CT_TESTING=ON \
+            -DPQC_BUILD_SHARED=OFF \
+            -DPQC_BUILD_BENCHMARKS=OFF \
+            -DPQC_BUILD_CLI=OFF
+          cmake --build build --target test_ct
+      - name: Run ctgrind on gated algorithms
         run: |
-          valgrind --tool=memcheck \
-            --track-origins=yes \
-            --error-exitcode=1 \
-            ./build/tests/test_kem 2>&1 | tee ct_kem.log
-          valgrind --tool=memcheck \
-            --track-origins=yes \
-            --error-exitcode=1 \
-            ./build/tests/test_sig 2>&1 | tee ct_sig.log
+          python3 tests/ct/run_ctgrind.py build/tests/test_ct \
+            --gate tests/ct/ct_gate.txt --gate-only \
+            --report ct-report.md --logs ct-logs
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctgrind-gated
+          path: |
+            ct-report.md
+            ct-logs/
 
   fuzzing:
     name: Fuzz Testing
@@ -388,15 +397,17 @@ jobs:
     # Signs with libpqc and verifies with OpenSSL, and the reverse, for every
     # ML-DSA and SLH-DSA parameter set, with and without a context string.
     # A round-trip test cannot see a defect that sign and verify share; this
-    # can. Ubuntu runners ship OpenSSL 3.0, which has neither algorithm, so
-    # this job uses Homebrew's openssl@3 and runs the driver directly: under
-    # ctest a missing algorithm is "skipped" (exit 77), which here must fail.
-    runs-on: macos-14
+    # can. ubuntu-latest (Ubuntu 26.04) ships OpenSSL 3.5, which has both
+    # algorithms; this job previously used Homebrew's openssl@3 on macOS.
+    # The driver runs directly rather than under ctest, because under ctest
+    # a missing algorithm is "skipped" (exit 77), which here must fail --
+    # as must an OpenSSL without the algorithms.
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: brew install ninja openssl@3
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build openssl
       - name: Build
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
@@ -404,9 +415,8 @@ jobs:
       - name: Cross-check against OpenSSL
         run: |
           set -euo pipefail
-          OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
-          "$OPENSSL" version
-          python3 tests/interop/openssl_interop.py build/tests/pqc_sig_tool --require-all --openssl "$OPENSSL"
+          openssl version
+          python3 tests/interop/openssl_interop.py build/tests/pqc_sig_tool --require-all --openssl openssl
 
   benchmarks:
     name: Performance Benchmarks

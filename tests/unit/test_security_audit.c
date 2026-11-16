@@ -632,6 +632,7 @@ static void test_kem_implicit_rejection(void)
         }
 
         rc_good = pqc_kem_decaps(kem, ss2, ct, sk);
+        int roundtrip = (rc_good == PQC_OK && memcmp(ss1, ss2, ss_len) == 0);
 
         /* Corrupt the ciphertext so decapsulation must implicitly reject. */
         ct[0] ^= 0xFF;
@@ -645,6 +646,37 @@ static void test_kem_implicit_rejection(void)
                  "%s: corrupt ciphertext returns the same status as valid",
                  algs[a]);
         check(rc_good == rc_bad, label);
+
+        /*
+         * The rejection key must actually be used: a corrupt ciphertext
+         * yields a secret other than the encapsulated one, and the same
+         * secret every time (it is derived from the secret seed s, not
+         * from fresh randomness). Decapsulation now selects between k'
+         * and s with a mask rather than a branch, and a wrong mask would
+         * pass the status check above. Only meaningful for a KEM that
+         * round-trips.
+         */
+        if (roundtrip) {
+            uint8_t *ss3 = (uint8_t *)calloc(1, ss_len);
+            if (ss3 && pqc_kem_decaps(kem, ss3, ct, sk) == PQC_OK) {
+                snprintf(label, sizeof(label),
+                         "%s: rejection secret differs from the real one", algs[a]);
+                check(memcmp(ss2, ss1, ss_len) != 0, label);
+                snprintf(label, sizeof(label),
+                         "%s: rejection secret is deterministic", algs[a]);
+                check(memcmp(ss2, ss3, ss_len) == 0, label);
+            }
+            free(ss3);
+        } else if (strncmp(algs[a], "NTRU-", 5) == 0) {
+            /* NTRU does not round-trip yet (see CHANGELOG known issues). */
+            printf("  SKIP  %s rejection-secret checks (does not round-trip)\n",
+                   algs[a]);
+        } else {
+            snprintf(label, sizeof(label),
+                     "%s: valid ciphertext decapsulates to the encapsulated secret",
+                     algs[a]);
+            check(0, label);
+        }
 
         free(pk); free(sk); free(ct); free(ss1); free(ss2);
         pqc_kem_free(kem);

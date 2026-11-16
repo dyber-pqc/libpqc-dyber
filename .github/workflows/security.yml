@@ -200,36 +200,52 @@ jobs:
             ./build/tests/test_security_audit
 
   # ============================================================
-  # Constant-Time Verification
+  # Constant-Time Verification (ctgrind), every algorithm
   #
-  # NOTE: this is Valgrind memcheck over a build that marks secret
-  # buffers as undefined (PQC_CT_TESTING). It detects branches and
-  # memory indices derived from secret data. It is not a substitute
-  # for a dedicated constant-time tool and does not prove the absence
-  # of timing leaks.
+  # Runs tests/ct/test_ct under Valgrind for all enabled algorithms and
+  # uploads the per-algorithm report. Fails only if an algorithm listed in
+  # tests/ct/ct_gate.txt regresses; the rest are reported so that the
+  # list of known findings stays current. A clean result is evidence for
+  # the code paths exercised in this build, not a proof.
   # ============================================================
 
   ct-verification:
-    name: Constant-Time Verification (memcheck-based)
+    name: Constant-Time Verification (ctgrind, all algorithms)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    continue-on-error: true
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - name: Install
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
-      - name: Build with CT markers
+      - name: Build
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DPQC_BUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g" \
+            -DPQC_ENABLE_CT_TESTING=ON \
+            -DPQC_BUILD_SHARED=OFF \
             -DPQC_BUILD_BENCHMARKS=OFF \
-            -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1 -g -O1"
-          cmake --build build
-      - name: Verify constant-time KEM operations
-        run: valgrind --tool=memcheck --error-exitcode=1 ./build/tests/test_kem
-      - name: Verify constant-time Signature operations
-        run: valgrind --tool=memcheck --error-exitcode=1 ./build/tests/test_sig
+            -DPQC_BUILD_CLI=OFF
+          cmake --build build --target test_ct
+      - name: Run ctgrind
+        # The three largest stateful parameter sets are left out: their key
+        # generation builds 2^15 to 2^20 leaves and does not finish under
+        # Valgrind inside the per-algorithm limit. Their signing code is the
+        # same as LMS-SHA256-H10 / XMSS-SHA2-10-256, which are gated.
+        run: |
+          python3 tests/ct/run_ctgrind.py build/tests/test_ct \
+            --gate tests/ct/ct_gate.txt --timeout 5400 \
+            --skip LMS-SHA256-H15 --skip XMSS-SHA2-16-256 \
+            --skip XMSS-SHA2-20-256 \
+            --report ct-report.md --logs ct-logs
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctgrind-all
+          path: |
+            ct-report.md
+            ct-logs/
 
   # ============================================================
   # Static Analysis

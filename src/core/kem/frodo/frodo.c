@@ -23,6 +23,7 @@
 #include "core/kem/kem_internal.h"
 #include "core/common/hash/sha3.h"
 #include "core/common/hash/sha2.h"
+#include "core/common/ct_ops.h"
 #include "frodo.h"
 #include "frodo_params.h"
 
@@ -434,25 +435,28 @@ int frodo_decaps_internal(uint8_t *ss, const uint8_t *ct,
         }
     }
 
-    /* Compute shared secret */
-    if (valid) {
-        /* ss = SHAKE(ct || k' || pkh) */
+    /*
+     * ss = SHAKE(ct || k' || pkh) if valid, else SHAKE(ct || s || pkh)
+     * (implicit rejection). The key is selected with a mask and hashed
+     * once, so neither the control flow nor the sequence of hash calls
+     * depends on validity. Before 0.3.0 this was an if/else on `valid`,
+     * which let an attacker who submits modified ciphertexts time whether
+     * each one decrypted correctly -- the decryption-failure oracle that
+     * implicit rejection exists to remove. len_k == len_s for every
+     * FrodoKEM parameter set.
+     */
+    {
+        uint8_t kbar[FRODO_MAX_LEN_K];
         pqc_shake256_ctx sctx;
+        memcpy(kbar, s_val, params->len_s);
+        pqc_ct_cmov(kbar, k_prime, params->len_k, (uint32_t)valid);
         pqc_shake256_init(&sctx);
         pqc_shake256_absorb(&sctx, ct, params->ct_bytes);
-        pqc_shake256_absorb(&sctx, k_prime, params->len_k);
+        pqc_shake256_absorb(&sctx, kbar, params->len_k);
         pqc_shake256_absorb(&sctx, pkh, params->len_pkh);
         pqc_shake256_finalize(&sctx);
         pqc_shake256_squeeze(&sctx, ss, params->len_ss);
-    } else {
-        /* Implicit rejection: ss = SHAKE(ct || s || pkh) */
-        pqc_shake256_ctx sctx;
-        pqc_shake256_init(&sctx);
-        pqc_shake256_absorb(&sctx, ct, params->ct_bytes);
-        pqc_shake256_absorb(&sctx, s_val, params->len_s);
-        pqc_shake256_absorb(&sctx, pkh, params->len_pkh);
-        pqc_shake256_finalize(&sctx);
-        pqc_shake256_squeeze(&sctx, ss, params->len_ss);
+        pqc_memzero(kbar, sizeof kbar);
     }
 
     /* Cleanup */

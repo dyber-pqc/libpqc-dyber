@@ -75,7 +75,7 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 - **20 language bindings** — C, C++, C#, Go, Rust, Java, Python, JavaScript, TypeScript, PHP, Ruby, Swift, Kotlin, Scala, Dart, Perl, R, MATLAB, Shell CLI, ASM
 - **7+ operating systems** — Linux, macOS, Windows, FreeBSD, Fedora, RHEL, Unix
 - **Hardware acceleration** — AVX2, AVX-512, ARM NEON, SVE, SHA-NI, PCLMULQDQ, BMI2
-- **Production-grade security** — Constant-time implementations, secure memory zeroization, NIST KAT validation
+- **Checked security properties** — Constant-time execution verified with Valgrind (ctgrind) in CI for ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, LMS, XMSS and the hybrids; ML-DSA and SLH-DSA interoperability-tested against OpenSSL; key material zeroized (see [Security](#security) for what is and is not covered)
 - **Hybrid schemes** — Combine PQC with classical algorithms (X25519, Ed25519, NIST P-256)
 - **Stateful signatures** — LMS (RFC 8554) and XMSS (RFC 8391) with safe state management
 - **Zero external dependencies** — All primitives (SHA-2, SHA-3, SHAKE, Keccak, Curve25519, P-256) implemented in-library
@@ -789,15 +789,33 @@ typedef enum {
 
 ## Security
 
-### Constant-Time Guarantees
+### Constant-Time Execution
 
-All operations on secret data use the `pqc_ct_*` utility functions:
+The goal is no branch and no memory access that depends on secret data.
+It is checked, not assumed: `tests/ct/test_ct` runs each algorithm under
+Valgrind with every random byte marked secret, and reports any branch or
+memory address derived from one (the "ctgrind" technique). CI blocks on
+this for the algorithms in [`tests/ct/ct_gate.txt`](tests/ct/ct_gate.txt):
 
-- **No branches** on secret values
-- **No secret-dependent memory accesses** (no lookup tables indexed by secrets)
-- **Constant-time comparison** via XOR-folding
-- **Constant-time conditional move** via bitwise masking
-- **Compiler barrier** to prevent optimization of zeroization
+- ML-KEM, ML-DSA and SLH-DSA (all parameter sets)
+- the four hybrid schemes, including X25519, Ed25519 and P-256
+- FrodoKEM
+- LMS-SHA256-H10 and XMSS-SHA2-10-256 (the larger LMS and XMSS sets
+  share the signing code but take too long under Valgrind for every
+  commit)
+
+**HQC and BIKE are not constant time**, and the remaining families are not
+yet functionally correct, so a timing result for them would mean nothing.
+See the Known issues in [CHANGELOG.md](CHANGELOG.md).
+
+A clean ctgrind run covers the code paths it exercised, in the build it
+ran (gcc -O2, x86-64). It does not see variable-time CPU instructions,
+paths not taken, or what another compiler emits. Values the standards
+make public (public keys, signatures, the matrix seed) are marked public
+with `PQC_CT_DECLASSIFY()`, each with a comment saying why.
+
+Helpers in `src/core/common/ct_ops.h` provide constant-time comparison,
+selection and conditional move.
 
 ### Memory Safety
 
@@ -821,10 +839,22 @@ All operations on secret data use the `pqc_ct_*` utility functions:
 
 ### Validation
 
-- NIST Known Answer Test (KAT) vectors for all implemented algorithms
-- Constant-time verification with valgrind/ctgrind in CI
-- Fuzzing with AFL++ and libFuzzer for all algorithm entry points
-- AddressSanitizer and UndefinedBehaviorSanitizer in debug builds
+What CI checks today:
+
+- Interoperability of ML-DSA and SLH-DSA with OpenSSL 3.5, in both
+  directions, for every parameter set
+- Published test vectors for the hash layer (FIPS 180-4, FIPS 202,
+  RFC 4231) and the classical primitives in the hybrids (RFC 7748,
+  RFC 8032, RFC 6979, NIST CAVP)
+- Constant-time execution with ctgrind, as above
+- AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind memcheck
+  across the test suite, and MemorySanitizer on the suites fast enough
+  to finish under it
+
+Not yet in place: NIST known-answer vectors for the post-quantum
+algorithms themselves (`tests/kat/` is empty), and fuzz targets (the CI
+fuzzing job builds with libFuzzer instrumentation but has no targets to
+run).
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 

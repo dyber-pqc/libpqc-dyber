@@ -14,6 +14,7 @@
 #include "core/sig/mldsa/ntt.h"
 #include "core/sig/mldsa/packing.h"
 #include "core/sig/mldsa/mldsa_params.h"
+#include "core/common/ct_check.h"
 
 /* ================================================================= */
 /*  l-vector operations                                                */
@@ -79,10 +80,11 @@ int pqc_mldsa_polyvecl_chknorm(const pqc_mldsa_polyvecl *v,
                                 int32_t bound, unsigned l)
 {
     unsigned int i;
+    int r = 0;
+    /* No early exit: which polynomial fails would depend on secrets. */
     for (i = 0; i < l; ++i)
-        if (pqc_mldsa_poly_chknorm(&v->vec[i], bound))
-            return 1;
-    return 0;
+        r |= pqc_mldsa_poly_chknorm(&v->vec[i], bound);
+    return r;
 }
 
 /* ================================================================= */
@@ -158,10 +160,10 @@ int pqc_mldsa_polyveck_chknorm(const pqc_mldsa_polyveck *v,
                                 int32_t bound, unsigned k)
 {
     unsigned int i;
+    int r = 0;
     for (i = 0; i < k; ++i)
-        if (pqc_mldsa_poly_chknorm(&v->vec[i], bound))
-            return 1;
-    return 0;
+        r |= pqc_mldsa_poly_chknorm(&v->vec[i], bound);
+    return r;
 }
 
 void pqc_mldsa_polyveck_power2round(pqc_mldsa_polyveck *v1,
@@ -232,6 +234,10 @@ void pqc_mldsa_polyvec_matrix_expand(pqc_mldsa_polyvecl *mat,
                                       unsigned k, unsigned l)
 {
     unsigned int i, j;
+    /* rho is part of the public key (FIPS 204 Algorithm 22). Rejection
+     * sampling on its expansion is public even when rho came from the
+     * secret seed in key generation or was read out of a secret key. */
+    PQC_CT_DECLASSIFY(rho, PQC_MLDSA_SEEDBYTES);
     for (i = 0; i < k; ++i)
         for (j = 0; j < l; ++j)
             pqc_mldsa_poly_uniform(&mat[i].vec[j], rho,

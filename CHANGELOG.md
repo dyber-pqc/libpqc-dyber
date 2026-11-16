@@ -72,7 +72,64 @@ round-trip test could not see.
   standard seeds it with `R || PK.seed || SHA-x(R || PK.seed || PK.root
   || M)`.
 
+The entries below were found by the new constant-time check (see Added).
+None of them changes any output.
+
+- **FrodoKEM decapsulation branched on whether the ciphertext was
+  valid.** After the re-encryption check, which itself was constant time,
+  it chose between `k'` and the rejection seed `s` with an `if`, under a
+  comment saying it must not branch. Anyone able to submit modified
+  ciphertexts and time the result could tell which ones decrypted
+  correctly: the decryption-failure oracle that implicit rejection exists
+  to remove. It now selects with a mask and hashes once. Packing the
+  re-encrypted ciphertext and decoding the decrypted message also
+  branched on each bit; both are now branch-free.
+- **P-256 scalar multiplication was not constant time** (listed as a
+  known issue in 0.2.1). It skipped the addition for zero bits of the
+  scalar, over formulas with special-case branches, and the scalar is the
+  private key in ECDH and the nonce in ECDSA signing. It is now a fixed
+  sequence of 256 doublings and additions using the complete formulas of
+  Renes, Costello and Batina (2016), with the result selected by mask.
+  `p256_fe_cmp`, used for the range checks on private scalars and nonces,
+  returned at the first differing limb; it is now branch-free too.
+- **ML-DSA signing branched on secret coefficients** in two places: the
+  norm checks on `z`, `r0` and `ct0` returned at the first coefficient
+  over the bound, and `MakeHint` compared with branches. Both are now
+  branch-free, so the only thing the signing loop reveals is whether an
+  attempt was rejected, which its running time reveals anyway.
+
 ### Added
+
+- **Constant-time verification ("ctgrind").** `tests/ct/test_ct` replaces
+  the RNG with one that marks every byte it returns as undefined to
+  Valgrind; memcheck then reports any branch or memory address derived
+  from secret data, through keygen, encapsulation, decapsulation of a
+  valid and of a modified ciphertext, and signing. Values that the
+  specifications make public -- the matrix seed rho, the ML-DSA challenge,
+  SLH-DSA's randomizer R and the roots it signs, signatures and public
+  keys -- are marked public at the point they become so with
+  `PQC_CT_DECLASSIFY()` (`src/core/common/ct_check.h`), each with a
+  comment saying why; that annotation compiles to nothing outside a
+  `PQC_ENABLE_CT_TESTING` build. `tests/ct/run_ctgrind.py` runs one
+  Valgrind process per algorithm and reports each finding by operation
+  and source line.
+
+  Before the fixes above, ML-KEM had 2 sites, ML-DSA 9, the P-256 hybrids
+  7 and 17, FrodoKEM 1 that hid 2 more behind it, and SLH-DSA, SPHINCS+,
+  XMSS and LMS 1 to 3 each. All of those are now clean, and
+  `tests/ct/ct_gate.txt` lists them: ML-KEM, ML-DSA, SLH-DSA, the four
+  hybrids, FrodoKEM, LMS-SHA256-H10 and XMSS-SHA2-10-256. CI fails if any
+  of them regresses. Every other algorithm is run weekly and reported;
+  see Known issues.
+
+  A clean result means memcheck saw no secret-dependent branch or address
+  on the paths exercised, in that build (gcc -O2, x86-64). It does not
+  see variable-time instructions such as division, paths not taken, or
+  what another compiler would emit. It is evidence, not proof.
+- `test_security_audit`: the implicit-rejection group now also checks
+  that a modified ciphertext yields a secret different from the real one,
+  and the same secret each time, and that every KEM in the group except
+  NTRU round-trips. With the FrodoKEM select inverted, it fails.
 
 - `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
   context string of up to 255 bytes. `pqc_sig_sign()` and
@@ -89,7 +146,8 @@ round-trip test could not see.
   SHA-2 hashing, all 48 cross-implementation SLH-DSA checks fail.
   Registered with ctest under the `interop`
   label (skipped where OpenSSL lacks the algorithms), and run in a new CI
-  job against Homebrew's OpenSSL, where a skip counts as a failure.
+  job against the system OpenSSL on Ubuntu 26.04, where a skip counts as
+  a failure.
 - `test_security_audit`: an SLH-DSA invariant group. Distinct key-pair
   indices must give distinct FORS and WOTS+ public keys, the caller's
   key-pair address must survive a call, and `H_msg` must write exactly m
@@ -99,6 +157,27 @@ round-trip test could not see.
 
 - SLH-DSA PRF_msg with SHA-256 now streams the message instead of copying
   messages under 64 KiB into a stack buffer first.
+- The two CI jobs named "Constant-Time Verification" ran plain Valgrind
+  memcheck. They set `PQC_CT_TESTING`, which nothing in the library read,
+  so they could not see a timing leak. They now run the ctgrind check
+  above: per commit on the gated algorithms (blocking), and weekly on all
+  of them.
+
+### Known issues
+
+From the ctgrind run over every algorithm:
+
+- **HQC and BIKE are not constant time.** HQC has 8 findings in each
+  parameter set, BIKE 30: fixed-weight sampling that branches and indexes
+  on secret positions, sparse polynomial multiplication indexed by secret
+  positions, table-based GF(2^m) arithmetic and branching decoders. These
+  are structural, not annotations, and are left for a dedicated change.
+- CROSS, Classic McEliece, MAYO, NTRU, NTRU Prime, SNOVA and UOV do not
+  round-trip under the check (decapsulation disagrees with encapsulation,
+  or a signature does not verify), and FN-DSA key generation fails
+  (already listed under 0.2.0). This matches their absence from the
+  round-trip allow lists. A timing result means nothing until they are
+  correct. LMS H20 and H25 key generation is not implemented.
 
 ## [0.2.1] - 2026-11-10
 
@@ -124,6 +203,8 @@ byte, X25519 did not. The first two entries below are that report; the
 rest came from auditing the remaining code in `src/core/hybrid/` the same
 way. None of it had known-answer tests, and the hybrid schemes were not on
 the round-trip allow list either.
+
+Reported by Conner (Spartan8806, https://github.com/spartan8806).
 
 ### Security
 

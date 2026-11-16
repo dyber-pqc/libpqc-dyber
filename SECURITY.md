@@ -38,19 +38,27 @@ What CI verifies:
 - Interoperability of ML-DSA and SLH-DSA with OpenSSL (3.5 or later), in
   both directions, for every parameter set, with and without a context
   string
+- Constant-time execution, with the ctgrind approach: `tests/ct/test_ct`
+  marks every byte from the RNG as undefined to Valgrind, which then
+  reports any branch or memory address derived from secret data. Blocking
+  for ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, the hybrid schemes,
+  LMS-SHA256-H10 and XMSS-SHA2-10-256 (`tests/ct/ct_gate.txt`); run
+  weekly, and reported, for every algorithm. This covers the paths the
+  test exercises in a gcc -O2 x86-64 build; it does not see
+  variable-time instructions or what other compilers emit.
 - Round-trip tests, and a regression suite asserting the specific invariant
   behind each previously reported defect
 - Zero-warning builds, reproducible builds, and static analysis
 
 Design intent that CI does **not** yet verify:
 
-- Constant-time execution for secret-dependent operations. The
-  implementations target it, but the Valgrind jobs run plain memcheck, which
-  detects memory errors and produces no timing signal. Verifying it needs the
-  ctgrind approach — marking secret buffers undefined so that branches and
-  indices derived from them are reported — which is not yet wired up.
+- Constant-time execution of HQC and BIKE, which the ctgrind run shows
+  they do not have, and of the algorithm families that are not yet
+  functionally correct.
 - Known-answer vectors for the post-quantum algorithms themselves. None are
   in the repository yet.
+- Fuzzing. The CI job builds with libFuzzer instrumentation but there are
+  no fuzz targets yet.
 
 Secret key material is zeroized on deallocation.
 

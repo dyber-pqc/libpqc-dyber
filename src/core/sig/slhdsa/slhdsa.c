@@ -19,6 +19,7 @@
 #include "pqc/rand.h"
 #include "core/sig/sig_internal.h"
 #include "slhdsa.h"
+#include "core/common/ct_check.h"
 
 /* ------------------------------------------------------------------ */
 /* Hash dispatch functions                                              */
@@ -198,6 +199,8 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
     /* Construct PK for hashing */
     memcpy(pk, pk_seed, n);
     memcpy(pk + n, pk_root, n);
+    /* PK.seed || PK.root is the public key. */
+    PQC_CT_DECLASSIFY(pk, 2 * n);
 
     /* Generate randomizer.  Use random opt_rand for hedged signing. */
     if (pqc_randombytes(opt_rand, n) != PQC_OK)
@@ -205,7 +208,11 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
 
     /* R = PRF_msg(SK.prf, opt_rand, M) */
     slhdsa_prf_msg(sig_ptr, sk_prf, opt_rand, pfx, pfxlen, msg, msglen, p);
-    /* sig_ptr[0..n-1] is now R */
+    /* sig_ptr[0..n-1] is now R, the first component of the signature.
+     * With R public, the digest -- and the FORS indices, tree index and
+     * leaf index taken from it -- are a function of public values only,
+     * which is how the verifier recomputes them (FIPS 205 Algorithm 20). */
+    PQC_CT_DECLASSIFY(sig_ptr, n);
 
     /* Compute message digest.
      * Zero the buffer first: split_digest may read more bytes than
@@ -230,6 +237,10 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
 
     /* Compute FORS public key for hypertree signing */
     slhdsa_fors_pk_from_sig(fors_pk, sig_ptr, md, pk_seed, addr, p);
+    /* The verifier recomputes the FORS public key from the signature
+     * (Algorithm 20, line 13), so it is public; the hypertree's WOTS+
+     * signature branches on its base-w digits. */
+    PQC_CT_DECLASSIFY(fors_pk, n);
 
     sig_ptr += p->fors_sig_bytes;
 
