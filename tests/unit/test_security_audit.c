@@ -677,7 +677,15 @@ static void test_sig_context(void)
         uint8_t *pk, *sk, *s1, *s2;
         size_t l1 = 0, l2 = 0;
 
-        if (!sig) { check(0, ctx_algs[i]); continue; }
+        if (!sig) {
+            /* Left out of this build (e.g. the minimal CI build) is a skip;
+             * compiled in but not constructible is a failure. */
+            if (pqc_sig_is_enabled(ctx_algs[i]))
+                check(0, ctx_algs[i]);
+            else
+                printf("  SKIP  %s (not in this build)\n", ctx_algs[i]);
+            continue;
+        }
         pk = malloc(pqc_sig_public_key_size(sig));
         sk = malloc(pqc_sig_secret_key_size(sig));
         s1 = malloc(pqc_sig_max_signature_size(sig));

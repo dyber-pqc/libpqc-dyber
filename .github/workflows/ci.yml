@@ -219,9 +219,12 @@ jobs:
             # (XMSS rebuilds a Merkle tree per signature, LMS builds 2^10
             # leaves) and test_fndsa_quick (FN-DSA keygen). All three still
             # run under ASan and UBSan above, so they are unchecked only by
-            # MSan. See the matching note in security.yml.
+            # MSan. See the matching note in security.yml. The OpenSSL
+            # interop test (label "interop") signs with every SLH-DSA
+            # parameter set through an instrumented tool and has its own job.
             ctest --test-dir build --output-on-failure --timeout 1800 \
-              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick"
+              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick" \
+              --label-exclude interop
           else
             ctest --test-dir build --output-on-failure --timeout 1800
           fi
@@ -403,7 +406,7 @@ jobs:
           set -euo pipefail
           OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
           "$OPENSSL" version
-          python3 tests/interop/openssl_interop.py build/tests/pqc_sig_tool --openssl "$OPENSSL"
+          python3 tests/interop/openssl_interop.py build/tests/pqc_sig_tool --require-all --openssl "$OPENSSL"
 
   benchmarks:
     name: Performance Benchmarks
@@ -429,12 +432,19 @@ jobs:
 
   binding-python:
     name: Python Binding
-    runs-on: ubuntu-latest
+    # ubuntu-latest is Ubuntu 26.04, which has no Python 3.9 build; 3.9 is
+    # still inside the binding's declared range, so it runs on 24.04.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     needs: build-linux
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest]
+        include:
+          - python-version: '3.9'
+            os: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

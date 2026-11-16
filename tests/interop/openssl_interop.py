@@ -20,7 +20,9 @@ expanded secret key.
 
 usage: openssl_interop.py PATH_TO_pqc_sig_tool [--openssl PATH] [--only SUBSTR]
 Exit 0 if every check passes, 1 on any failure, 77 if OpenSSL lacks the
-algorithms (CTest SKIP_RETURN_CODE).
+algorithms or libpqc was built without any of them (CTest SKIP_RETURN_CODE).
+Algorithms left out of this libpqc build are skipped; --require-all makes
+that a failure instead, for the CI job whose build has everything.
 """
 import argparse
 import os
@@ -85,6 +87,8 @@ def main():
     ap.add_argument("tool")
     ap.add_argument("--openssl", default="openssl")
     ap.add_argument("--only", default="")
+    ap.add_argument("--require-all", action="store_true",
+                    help="fail, rather than skip, algorithms not in this build")
     a = ap.parse_args()
     a.tool = os.path.abspath(a.tool)
 
@@ -100,6 +104,7 @@ def main():
     ctx_b = b"libpqc-dyber/interop/ctX"
     failures = 0
     checks = 0
+    skipped = []
 
     def check(ok, what):
         nonlocal failures, checks
@@ -120,6 +125,10 @@ def main():
                 continue
             print(ours)
             r = run([a.tool, "keygen", ours, f("pk"), f("sk")])
+            if r.returncode == 3 and not a.require_all:
+                print("  [SKIP] not in this build")
+                skipped.append(ours)
+                continue
             if r.returncode != 0:
                 check(False, "libpqc keygen: %s" % r.stderr.decode().strip())
                 continue
@@ -168,8 +177,11 @@ def main():
                      "hexcontext-string:" + ctx_b.hex()])
             check(r.returncode != 0, "OpenSSL rejects it too")
 
-    print("\n%d checks, %d failures" % (checks, failures))
-    return 1 if failures else 0
+    print("\n%d checks, %d failures, %d algorithms skipped"
+          % (checks, failures, len(skipped)))
+    if failures:
+        return 1
+    return 77 if checks == 0 else 0
 
 
 if __name__ == "__main__":

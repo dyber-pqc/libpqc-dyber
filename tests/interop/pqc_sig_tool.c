@@ -79,8 +79,10 @@ int main(int argc, char **argv)
     if (pqc_init() != PQC_OK) return 2;
     sig = pqc_sig_new(argv[2]);
     if (!sig) {
-        fprintf(stderr, "unknown algorithm %s\n", argv[2]);
-        return 2;
+        /* Exit 3 = not in this build (e.g. a minimal build), which the
+         * interop script reports as a skip rather than a failure. */
+        fprintf(stderr, "algorithm not available in this build: %s\n", argv[2]);
+        return 3;
     }
 
     if (strcmp(argv[1], "keygen") == 0 && argc == 5) {
