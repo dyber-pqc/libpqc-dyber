@@ -334,6 +334,10 @@ Found by the new fuzz targets (see Added):
   to 0.9 s and encapsulation 0.3 to 0.4 s. It is replaced by the
   specified Algorithm 3, which never rejects.
 - BIKE is on the round-trip allow list in `test_kem_all.c`.
+- CI, benchmark and release builds on macOS move to macOS 15
+  (`macos-15` for arm64, `macos-15-intel` for x86_64). GitHub retired the
+  `macos-13` and `macos-14` images they used, so those jobs had stopped
+  running at all.
 
 ### Known issues
 

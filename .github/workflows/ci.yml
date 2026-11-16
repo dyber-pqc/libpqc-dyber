@@ -86,28 +86,28 @@ jobs:
     name: macOS (${{ matrix.arch }}, ${{ matrix.build_type }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    # Only the x86_64 entry is advisory. macos-13 is the Intel image GitHub
-    # is retiring, and capacity for it has dried up: this job sat queued
-    # and was superseded in five consecutive runs without ever starting.
-    # That is a runner-availability problem, not a signal about the code,
-    # and it should not gate the run -- the same treatment FreeBSD already
-    # gets below. The arm64 entries stay blocking.
+    # Runner images: GitHub retired macos-13 (Intel) in 2025 and macos-14
+    # on 2026-11-02, after which these jobs failed with "configuration not
+    # supported" without ever starting. They now pin macOS 15: macos-15
+    # (arm64) and macos-15-intel (x86_64, which GitHub supports until the
+    # macOS 15 image is retired). Pinned rather than macos-latest so that
+    # an image change is a deliberate edit, not a surprise.
     #
-    # Worth revisiting: retarget to whichever Intel image currently has
-    # capacity, since this library does carry x86_64 assembly paths and
-    # losing Intel coverage is a real gap, not a tidy-up.
+    # Only the x86_64 entry is advisory, as before: Intel capacity has been
+    # the scarce one, and a queue there should not gate the run. The arm64
+    # entries stay blocking.
     continue-on-error: ${{ matrix.arch == 'x86_64' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
             build_type: Release
-          - runner: macos-13
+          - runner: macos-15-intel
             arch: x86_64
             build_type: Release
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
             build_type: Debug
     steps:
