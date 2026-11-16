@@ -139,16 +139,8 @@ void slhdsa_wots_gen_pk(uint8_t *pk,
     memset(prf_addr, 0, 32);
     slhdsa_copy_subtree_addr(prf_addr, addr);
     slhdsa_set_type(prf_addr, SLHDSA_ADDR_TYPE_WOTSPRF);
-    slhdsa_set_keypair_addr(prf_addr, 0);
-    /* Copy keypair from the original address */
-    {
-        uint8_t kp_addr[32];
-        memset(kp_addr, 0, 32);
-        slhdsa_copy_keypair_addr(kp_addr, addr);
-        slhdsa_set_keypair_addr(prf_addr,
-            ((uint32_t)kp_addr[16] << 24) | ((uint32_t)kp_addr[17] << 16) |
-            ((uint32_t)kp_addr[18] <<  8) | ((uint32_t)kp_addr[19]));
-    }
+    /* FIPS 205 Algorithms 6 and 7: skADRS keeps the key pair address. */
+    slhdsa_set_keypair_addr(prf_addr, slhdsa_get_keypair_addr(addr));
 
     slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTS);
 
@@ -196,14 +188,8 @@ void slhdsa_wots_sign(uint8_t *sig,
     memset(prf_addr, 0, 32);
     slhdsa_copy_subtree_addr(prf_addr, addr);
     slhdsa_set_type(prf_addr, SLHDSA_ADDR_TYPE_WOTSPRF);
-    {
-        uint8_t kp_addr[32];
-        memset(kp_addr, 0, 32);
-        slhdsa_copy_keypair_addr(kp_addr, addr);
-        slhdsa_set_keypair_addr(prf_addr,
-            ((uint32_t)kp_addr[16] << 24) | ((uint32_t)kp_addr[17] << 16) |
-            ((uint32_t)kp_addr[18] <<  8) | ((uint32_t)kp_addr[19]));
-    }
+    /* FIPS 205 Algorithms 6 and 7: skADRS keeps the key pair address. */
+    slhdsa_set_keypair_addr(prf_addr, slhdsa_get_keypair_addr(addr));
 
     slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTS);
 
