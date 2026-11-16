@@ -59,10 +59,14 @@ int32_t pqc_mldsa_decompose(int32_t *a0, int32_t a, int32_t gamma2)
 
 unsigned pqc_mldsa_make_hint(int32_t a0, int32_t a1, int32_t gamma2)
 {
-    if (a0 > gamma2 || a0 < -gamma2 ||
-        (a0 == -gamma2 && a1 != 0))
-        return 1;
-    return 0;
+    /* Branch-free: a0 and a1 are derived from the secret key. |a0| and
+     * gamma2 are below q, so none of these differences overflow. */
+    uint32_t gt = (uint32_t)(gamma2 - a0) >> 31;        /* a0 >  gamma2 */
+    uint32_t lt = (uint32_t)(a0 + gamma2) >> 31;        /* a0 < -gamma2 */
+    int32_t  d  = a0 + gamma2;
+    uint32_t eq = ((uint32_t)(d | -d) >> 31) ^ 1;       /* a0 == -gamma2 */
+    uint32_t nz = (uint32_t)(a1 | -a1) >> 31;           /* a1 != 0 */
+    return gt | lt | (eq & nz);
 }
 
 /* ------------------------------------------------------------------ */

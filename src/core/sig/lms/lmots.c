@@ -17,6 +17,7 @@
 #include "lms.h"
 #include "pqc/common.h"
 #include "core/common/hash/sha2.h"
+#include "core/common/ct_check.h"
 
 #define N PQC_LMS_SHA256_N
 #define P PQC_LMOTS_P
@@ -206,6 +207,10 @@ void lmots_sign(uint8_t *sig, const uint8_t *msg, size_t msglen,
 
     /* Compute digest/coefficients */
     lmots_compute_digest(coef, I, q, C, msg, msglen);
+    /* C is in the signature, and I and q in the public key and signature,
+     * so the coefficients are public: the verifier recomputes them
+     * (RFC 8554 Algorithm 4b). The chain lengths below depend on them. */
+    PQC_CT_DECLASSIFY(coef, sizeof(coef));
 
     /* Chain values */
     for (i = 0; i < P; i++) {

@@ -36,9 +36,10 @@ void frodo_pack(uint8_t *out, const uint16_t *in,
         for (int b = (int)log_q - 1; b >= 0; b--) {
             uint32_t byte_idx = bit_pos / 8;
             uint32_t bit_idx  = 7 - (bit_pos % 8); /* MSB first within byte */
-            if ((val >> b) & 1) {
-                out[byte_idx] |= (uint8_t)(1u << bit_idx);
-            }
+            /* No branch on the bit: in decapsulation this packs the
+             * re-encrypted ciphertext, which is derived from the
+             * decrypted message. */
+            out[byte_idx] |= (uint8_t)(((uint32_t)(val >> b) & 1u) << bit_idx);
             bit_pos++;
         }
     }
@@ -138,9 +139,8 @@ void frodo_decode(uint8_t *msg, const uint16_t *in,
 
         /* Extract B bits and place into message */
         for (uint32_t j = 0; j < b && bit_idx < len_mu_bits; j++) {
-            if ((val >> j) & 1) {
-                msg[bit_idx / 8] |= (uint8_t)(1u << (bit_idx % 8));
-            }
+            /* No branch on the bit: this is the decrypted message. */
+            msg[bit_idx / 8] |= (uint8_t)(((uint32_t)(val >> j) & 1u) << (bit_idx % 8));
             bit_idx++;
         }
     }

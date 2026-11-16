@@ -25,6 +25,7 @@
 #include "core/sig/mldsa/rounding.h"
 #include "core/sig/mldsa/hint.h"
 #include "core/common/hash/sha3.h"
+#include "core/common/ct_check.h"
 
 /* ================================================================= */
 /*  Parameter set definitions                                          */
@@ -197,6 +198,20 @@ pqc_status_t pqc_mldsa_keygen(const pqc_mldsa_params_t *params,
 /* ================================================================= */
 /*  ML-DSA.Sign                                                        */
 /*  Reference: crypto_sign_signature_internal in pq-crystals/dilithium */
+/*
+ * The outcome of each rejection test in the signing loop is public: the
+ * number of iterations is visible to anyone timing the signer, and the
+ * candidates that are rejected are never released. Declassifying the
+ * yes/no result -- and only that -- lets the loop branch on it while
+ * memcheck keeps checking that the tests themselves (chknorm, make_hint)
+ * do not branch on the secret values they inspect.
+ */
+static int mldsa_reject(int r)
+{
+    PQC_CT_DECLASSIFY(&r, sizeof r);
+    return r;
+}
+
 /* ================================================================= */
 
 pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
@@ -279,6 +294,15 @@ rej:
     pqc_shake256_finalize(&state);
     pqc_shake256_squeeze(&state, sig, params->ctilde_bytes);
 
+    /* c~ is the first component of the signature. For an iteration that is
+     * rejected it is a hash of mu and w1 alone, and w1 = HighBits(A*y)
+     * depends only on the fresh mask y, not on s1 or s2; the key enters
+     * only through z and r0, which are never released for a rejected
+     * iteration. SampleInBall (poly_challenge) rejection-samples on c~,
+     * as FIPS 204 Algorithm 29 specifies, so it is declassified here as
+     * mldsa-native and the reference implementation do. */
+    PQC_CT_DECLASSIFY(sig, params->ctilde_bytes);
+
     pqc_mldsa_poly_challenge(&cp, sig, params->ctilde_bytes, params->tau);
     pqc_mldsa_poly_ntt(&cp);
 
@@ -287,8 +311,8 @@ rej:
     pqc_mldsa_polyvecl_invntt(&z, params->l);
     pqc_mldsa_polyvecl_add(&z, &z, &y, params->l);
     pqc_mldsa_polyvecl_reduce(&z, params->l);
-    if (pqc_mldsa_polyvecl_chknorm(&z,
-            params->gamma1 - (int32_t)params->beta, params->l))
+    if (mldsa_reject(pqc_mldsa_polyvecl_chknorm(&z,
+            params->gamma1 - (int32_t)params->beta, params->l)))
         goto rej;
 
     /* Check that subtracting cs2 does not change high bits of w and
@@ -297,23 +321,28 @@ rej:
     pqc_mldsa_polyveck_invntt(&h, params->k);
     pqc_mldsa_polyveck_sub(&w0, &w0, &h, params->k);
     pqc_mldsa_polyveck_reduce(&w0, params->k);
-    if (pqc_mldsa_polyveck_chknorm(&w0,
-            params->gamma2 - (int32_t)params->beta, params->k))
+    if (mldsa_reject(pqc_mldsa_polyveck_chknorm(&w0,
+            params->gamma2 - (int32_t)params->beta, params->k)))
         goto rej;
 
     /* Compute hints for w1 */
     pqc_mldsa_polyveck_pointwise_poly(&h, &cp, &t0, params->k);
     pqc_mldsa_polyveck_invntt(&h, params->k);
     pqc_mldsa_polyveck_reduce(&h, params->k);
-    if (pqc_mldsa_polyveck_chknorm(&h,
-            (int32_t)params->gamma2, params->k))
+    if (mldsa_reject(pqc_mldsa_polyveck_chknorm(&h,
+            (int32_t)params->gamma2, params->k)))
         goto rej;
 
     pqc_mldsa_polyveck_add(&w0, &w0, &h, params->k);
     n = pqc_mldsa_polyveck_make_hint(&h, &w0, &w1,
                                       params->gamma2, params->k);
-    if (n > params->omega)
+    if (mldsa_reject(n > params->omega))
         goto rej;
+
+    /* Accepted: z and h are released as the signature, so they are public
+     * from here. Packing h branches on which coefficients are set. */
+    PQC_CT_DECLASSIFY(&z, sizeof z);
+    PQC_CT_DECLASSIFY(&h, sizeof h);
 
     /* Write signature: sig = (c_tilde || z || h) */
     pqc_mldsa_pack_sig(sig, sig, &z, &h, params);

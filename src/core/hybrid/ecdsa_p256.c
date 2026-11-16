@@ -16,6 +16,7 @@
 #include "pqc/rand.h"
 #include "core/common/hash/sha2.h"
 #include "field_p256.h"
+#include "core/common/ct_check.h"
 #include "ecdsa_p256.h"
 
 /* ------------------------------------------------------------------ */
@@ -83,11 +84,14 @@ static int rfc6979_generate_k(uint8_t k_out[32], const uint8_t x[32],
         p256_fe k_fe;
         p256_scalar_frombytes(k_fe, V);
 
-        /* Check k != 0 */
-        if (p256_fe_is_zero(k_fe)) goto retry;
-
-        /* Check k < n */
-        if (p256_fe_cmp(k_fe, P256_N) >= 0) goto retry;
+        /* Check 1 <= k < n. RFC 6979 section 3.2 step h.3 retries on
+         * failure; whether this candidate was rejected is declassified
+         * (it is discarded, and the next is independent of it), the
+         * candidate itself is not. */
+        int bad = p256_fe_is_zero(k_fe) | (p256_fe_cmp(k_fe, P256_N) >= 0);
+        pqc_memzero(k_fe, sizeof(k_fe));
+        PQC_CT_DECLASSIFY(&bad, sizeof bad);
+        if (bad) goto retry;
 
         memcpy(k_out, V, 32);
         pqc_memzero(V, sizeof(V));
@@ -126,13 +130,16 @@ int ecdsa_p256_keygen(uint8_t pk[64], uint8_t sk[64])
         if (rc != PQC_OK)
             return (int)rc;
 
+        /* Reject 0 and >= n; see ecdh_p256_keygen() for why the outcome
+         * may be declassified. */
         uint8_t z = 0;
         for (int i = 0; i < 32; i++) z |= scalar[i];
-        if (z == 0) continue;
-
         p256_fe s_fe;
         p256_scalar_frombytes(s_fe, scalar);
-        if (p256_fe_cmp(s_fe, P256_N) >= 0) continue;
+        int bad = (z == 0) | (p256_fe_cmp(s_fe, P256_N) >= 0);
+        pqc_memzero(s_fe, sizeof(s_fe));
+        PQC_CT_DECLASSIFY(&bad, sizeof bad);
+        if (bad) continue;
 
         break;
     } while (1);
@@ -174,7 +181,10 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
 
     /* The private scalar must be in [1, n-1] */
     p256_scalar_frombytes(d_fe, d);
-    if (p256_fe_is_zero(d_fe) || p256_fe_cmp(d_fe, P256_N) >= 0)
+    int out_of_range = p256_fe_is_zero(d_fe) | (p256_fe_cmp(d_fe, P256_N) >= 0);
+    /* Only a malformed key fails this, and it is rejected outright. */
+    PQC_CT_DECLASSIFY(&out_of_range, sizeof out_of_range);
+    if (out_of_range)
         return -1;
 
     /* Generate deterministic k */
@@ -194,6 +204,9 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
 
     /* Reduce r mod n (r_fe might be >= n since it's a field element mod p) */
     p256_scalar_reduce(r_fe);
+
+    /* r is the first half of the signature. */
+    PQC_CT_DECLASSIFY(r_fe, sizeof(p256_fe));
 
     /* Check r != 0 */
     if (p256_fe_is_zero(r_fe)) {
@@ -219,6 +232,9 @@ int ecdsa_p256_sign(uint8_t sig[64], const uint8_t *msg, size_t msglen,
 
     /* s = k_inv * (h + r*d) mod n */
     p256_scalar_mul(s_fe, k_inv, s_fe);
+
+    /* s is the second half of the signature. */
+    PQC_CT_DECLASSIFY(s_fe, sizeof(p256_fe));
 
     /* Check s != 0 */
     if (p256_fe_is_zero(s_fe)) {

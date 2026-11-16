@@ -19,6 +19,7 @@
 
 #include "pqc/common.h"
 #include "slhdsa.h"
+#include "core/common/ct_check.h"
 
 /* ------------------------------------------------------------------ */
 /* Hypertree sign                                                       */
@@ -85,6 +86,10 @@ void slhdsa_ht_sign(uint8_t *sig,
                                      pub_seed, addr, p);
             slhdsa_xmss_root_from_sig(root, idx_leaf, auth_path,
                                        wots_pk, pub_seed, addr, p);
+            /* Each layer's root is what the next layer's WOTS+ key signs,
+             * and the verifier recomputes it from the signature
+             * (Algorithm 13), so it is public. */
+            PQC_CT_DECLASSIFY(root, n);
         }
     }
 
@@ -125,6 +130,7 @@ void slhdsa_ht_sign(uint8_t *sig,
                                          pub_seed, addr, p);
                 slhdsa_xmss_root_from_sig(root, leaf, auth_path,
                                            wots_pk, pub_seed, addr, p);
+                PQC_CT_DECLASSIFY(root, n);   /* see layer 0 */
             }
         }
 

@@ -132,3 +132,11 @@ if(Python3_Interpreter_FOUND AND PQC_OPENSSL_EXECUTABLE)
     set_tests_properties(test_openssl_interop PROPERTIES
                          TIMEOUT 900 LABELS interop SKIP_RETURN_CODE 77)
 endif()
+
+# Constant-time check (ctgrind). Run through tests/ct/run_ctgrind.py, which
+# starts one Valgrind process per algorithm; see that script.
+if(PQC_ENABLE_CT_TESTING)
+    add_executable(test_ct ct/test_ct.c)
+    target_link_libraries(test_ct PRIVATE pqc_static)
+    target_include_directories(test_ct PRIVATE ${PQC_INCLUDE_DIRS})
+endif()
