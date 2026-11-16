@@ -5,15 +5,30 @@ All notable changes to libpqc-dyber will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 0.3.0
+## [0.3.0] - 2026-11-16
 
-ML-DSA and SLH-DSA now implement FIPS 204 and FIPS 205. Before this
-release neither interoperated with any other implementation. Their
-signatures verified under libpqc-dyber, because signing and verification
-shared the same deviations, and verified nowhere else. Both are now
-checked against OpenSSL 3.5 in both directions, for every parameter set,
-with and without a context string. BIKE now implements the round 4
-specification and reproduces its official known-answer tests.
+This is a security and conformance release.
+
+- **ML-DSA and SLH-DSA now implement FIPS 204 and FIPS 205.** Before
+  this release neither interoperated with any other implementation:
+  signatures verified under libpqc-dyber, because signing and
+  verification shared the same deviations, and nowhere else. Both now
+  pass NIST's ACVP vectors and are checked against OpenSSL 3.5 in both
+  directions, with and without a context string.
+- **BIKE now implements the round 4 specification** and reproduces all
+  300 official known-answer vectors. Before, it was a different KEM on
+  the same code, and a malformed ciphertext could hold a core for
+  minutes.
+- **ML-KEM now performs the FIPS 203 input checks** it skipped, and
+  passes NIST's ACVP vectors.
+- **Constant-time execution is now verified**, by a Valgrind ("ctgrind")
+  check that blocks CI for ML-KEM, ML-DSA, SLH-DSA, BIKE, FrodoKEM, the
+  hybrids, LMS and XMSS. Fixing what it found closed a decryption-failure
+  timing oracle in FrodoKEM and in BIKE, made P-256 scalar multiplication
+  constant time, and removed secret-dependent branches from ML-DSA
+  signing.
+- **Fuzz targets** for signature verification and KEM decapsulation now
+  run in CI; the first run found undefined behaviour in NTRU.
 
 **This release changes signature bytes, SLH-DSA public keys, and
 everything BIKE produces.**
@@ -32,10 +47,15 @@ everything BIKE produces.**
   key is now h0 || h1 || sigma as in the specification: 3114, 6198 and
   10276 bytes at L1, L3 and L5, 32 bytes shorter than before. BIKE keys
   must be regenerated.
+- ML-KEM keys and outputs are unchanged, but encapsulation to a key that
+  fails the FIPS 203 modulus check, and decapsulation with a key that
+  fails the hash check, now return `PQC_ERROR_INVALID_KEY`. The ML-KEM
+  hybrids inherit this.
 
 Reported by Conner (Spartan8806). Testing his findings against OpenSSL
 turned up the SLH-DSA address-layout and SHA-2 defects below, which a
-round-trip test could not see.
+round-trip test could not see; the rest came from the verification work
+that followed (constant-time checking, fuzzing, and known-answer tests).
 
 ### Security
 
