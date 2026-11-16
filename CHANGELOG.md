@@ -104,6 +104,19 @@ None of them changes any output.
   branch-free, so the only thing the signing loop reveals is whether an
   attempt was rejected, which its running time reveals anyway.
 
+Found by NIST's ACVP vectors for ML-KEM (see Added):
+
+- **ML-KEM did not perform the input checks FIPS 203 requires.**
+  Encapsulation did not apply the modulus check of section 7.2, so an
+  encapsulation key with a coefficient of q or more was used as if it
+  were reduced; decapsulation did not apply the hash check of section
+  7.3, so a decapsulation key whose embedded encapsulation key and stored
+  H(ek) disagreed was used anyway. Both now fail with
+  `PQC_ERROR_INVALID_KEY`. ACVP has 20 key-check vectors per parameter
+  set, 10 of them invalid keys; all 30 invalid keys were accepted. Valid keys
+  and all outputs are unchanged; the decapsulation check is constant time
+  and ctgrind stays clean. The hybrid KEMs inherit both checks.
+
 Found by the new fuzz targets (see Added):
 
 - **NTRU polynomial multiplication overflowed a signed integer.** Both
@@ -221,6 +234,19 @@ Found by the new fuzz targets (see Added):
   in ctest. `tests/kat/nist_drbg.c` holds the DRBG and a test-only
   AES-256 (checked against FIPS 197 C.3), for reuse by later KATs.
 - `pqc_sha3_384()`, with FIPS 202 test vectors in `test_hash`.
+- **Known-answer tests for ML-KEM**, from NIST's ACVP vectors for FIPS
+  203 (usnistgov/ACVP-Server, pinned commit; provenance in the file
+  header). `tests/kat/test_kat_mlkem` runs 240 of them across the three
+  parameter sets: key generation from (d, z), encapsulation from (ek, m),
+  decapsulation including ciphertexts that must be implicitly rejected,
+  and the section 7.2 and 7.3 key checks. ACVP gives d, z and m directly,
+  so they are fed through the RNG hook, and a test fails if the library
+  draws other than exactly 64 bytes for key generation or 32 for
+  encapsulation. `tests/kat/mlkem_acvp.txt` (646 KB) keeps inputs
+  verbatim and large outputs as SHA-256; `tests/kat/tools/
+  acvp_mlkem_to_kat.py` regenerates it from the ACVP JSON. Key
+  generation, encapsulation and decapsulation passed all 180 vectors
+  unchanged; the key checks found the defect above.
 
 - `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
   context string of up to 255 bytes. `pqc_sig_sign()` and

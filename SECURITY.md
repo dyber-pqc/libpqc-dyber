@@ -46,6 +46,9 @@ What CI verifies:
   weekly, and reported, for every algorithm. This covers the paths the
   test exercises in a gcc -O2 x86-64 build; it does not see
   variable-time instructions or what other compilers emit.
+- ML-KEM against NIST's ACVP vectors for FIPS 203 (key generation,
+  encapsulation, decapsulation and the section 7.2 / 7.3 input checks;
+  240 tests)
 - BIKE against all 300 official round 4 known-answer vectors, by
   regenerating NIST's response files with its DRBG (`tests/kat/`)
 - Round-trip tests, and a regression suite asserting the specific invariant
@@ -57,8 +60,8 @@ Design intent that CI does **not** yet verify:
 - Constant-time execution of HQC, which the ctgrind run shows it does
   not have, and of the algorithm families that are not yet functionally
   correct.
-- Known-answer vectors for the post-quantum algorithms other than BIKE,
-  ML-KEM included.
+- Known-answer vectors for the post-quantum algorithms other than ML-KEM
+  and BIKE. ML-DSA and SLH-DSA are cross-checked against OpenSSL instead.
 - Deep fuzzing. CI fuzzes signature verification and KEM decapsulation /
   encapsulation for 10 minutes per target per run (`tests/fuzz/`); that
   is a smoke test, not continuous fuzzing. A few algorithms are fuzzed
@@ -69,8 +72,9 @@ Secret key material is zeroized on deallocation.
 
 ## Implementation status
 
-ML-KEM (FIPS 203), the hash layer and, as of 0.2.1, the classical halves of
-the hybrid schemes are tested against independent references; so, as of
+ML-KEM (FIPS 203; NIST's ACVP vectors as of 0.3.0), the hash layer and, as
+of 0.2.1, the classical halves of the hybrid schemes are tested against
+independent references; so, as of
 0.3.0, are ML-DSA (FIPS 204) and SLH-DSA (FIPS 205), and BIKE (round 4,
 against its official known-answer tests). Several other algorithm families are incomplete. The "Known
 issues" section of CHANGELOG.md is the maintained list; it is kept specific
