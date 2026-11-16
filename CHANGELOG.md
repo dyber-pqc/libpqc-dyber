@@ -98,6 +98,18 @@ None of them changes any output.
   branch-free, so the only thing the signing loop reveals is whether an
   attempt was rejected, which its running time reveals anyway.
 
+Found by the new fuzz targets (see Added):
+
+- **NTRU polynomial multiplication overflowed a signed integer.** Both
+  multiplication routines summed products in an `int32_t`; with q = 4096
+  and n = 821 a coefficient reaches about 1.4 x 10^10. That is undefined
+  behaviour, and decapsulating a malformed NTRU-HPS-4096-821 or
+  NTRU-HRSS-701 ciphertext triggered it immediately. They now accumulate
+  in `uint32_t`, which wraps, and since every modulus is a power of two
+  of at most 2^16 the result is unchanged. Both also skipped zero
+  coefficients of the first operand, often a secret; that branch is gone.
+  NTRU still does not round-trip (Known issues).
+
 ### Added
 
 - **Constant-time verification ("ctgrind").** `tests/ct/test_ct` replaces
@@ -130,6 +142,21 @@ None of them changes any output.
   that a modified ciphertext yields a secret different from the real one,
   and the same secret each time, and that every KEM in the group except
   NTRU round-trips. With the FrodoKEM select inverted, it fails.
+- **Fuzz targets.** `tests/fuzz/fuzz_sig_verify` feeds attacker-chosen
+  signatures, public keys, context strings (including over-long ones) and
+  signature lengths to verification for every signature algorithm, and
+  mutations of a valid signature so inputs get past the format checks.
+  `tests/fuzz/fuzz_kem` feeds attacker-chosen and mutated ciphertexts to
+  decapsulation and attacker-chosen public keys to encapsulation, for
+  every KEM. Built with `-DPQC_BUILD_FUZZERS=ON` (Clang), under
+  AddressSanitizer and UndefinedBehaviorSanitizer. The CI fuzzing job,
+  which until now printed a message and fuzzed nothing, runs each for 10
+  minutes with a corpus cached between runs and fails on any crash,
+  sanitizer report or timeout. Algorithms whose key generation is too
+  slow under ASan to set up per process (Classic McEliece, the larger
+  LMS and XMSS trees, the SLH-DSA/SPHINCS+ SHAKE "s" sets) and FN-DSA
+  are fuzzed with attacker-chosen keys only; BIKE decapsulation is not
+  fuzzed (Known issues).
 
 - `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
   context string of up to 255 bytes. `pqc_sig_sign()` and
@@ -162,8 +189,24 @@ None of them changes any output.
   so they could not see a timing leak. They now run the ctgrind check
   above: per commit on the gated algorithms (blocking), and weekly on all
   of them.
+- `test_fndsa_quick` printed "FAIL" when FN-DSA key generation failed --
+  which it always does -- and exited 0, so CI showed it passing. It now
+  exits 1 on any failure and covers both parameter sets. It is registered
+  as an expected failure judged by its output: it passes only if both
+  sets report the known key-generation failure and no sanitizer reports
+  an error, so a memory error in FN-DSA key generation still fails CI.
+  When key generation starts working the test fails, as a prompt to make
+  it an ordinary one.
 
 ### Known issues
+
+- **BIKE decapsulation is slow enough to be a denial-of-service vector.**
+  The bit-flipping decoder is quadratic in the block length r at every
+  iteration, and a malformed ciphertext runs every iteration with many
+  flips. In a release build (gcc -O2, x86-64) one decapsulation takes
+  about 1, 3 and 5 seconds for a valid ciphertext at L1, L3 and L5, and
+  22, 60 and 148 seconds for a random one. Anyone who can send a
+  ciphertext can occupy a core for minutes. Found while fuzzing.
 
 From the ctgrind run over every algorithm:
 

@@ -52,6 +52,11 @@ option(PQC_ENABLE_HYBRID "Enable hybrid schemes" ON)
 # headers. Not for production builds.
 option(PQC_ENABLE_CT_TESTING "Build for constant-time checking under Valgrind" OFF)
 
+# libFuzzer targets in tests/fuzz (Clang only). Instruments the library for
+# coverage; pass the sanitizers to use in CMAKE_C_FLAGS, e.g.
+# -fsanitize=address,undefined -fno-sanitize-recover=undefined.
+option(PQC_BUILD_FUZZERS "Build libFuzzer targets (Clang)" OFF)
+
 # Include CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/CompilerFlags.cmake)
@@ -296,6 +301,18 @@ if(PQC_BUILD_STATIC)
         set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc)
     endif()
     target_compile_definitions(pqc_static PRIVATE PQC_BUILD)
+endif()
+
+if(PQC_BUILD_FUZZERS)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "PQC_BUILD_FUZZERS needs Clang (libFuzzer)")
+    endif()
+    if(NOT PQC_BUILD_TESTS)
+        message(FATAL_ERROR "PQC_BUILD_FUZZERS needs PQC_BUILD_TESTS")
+    endif()
+    if(TARGET pqc_static)
+        target_compile_options(pqc_static PRIVATE -fsanitize=fuzzer-no-link)
+    endif()
 endif()
 
 if(PQC_ENABLE_CT_TESTING)
