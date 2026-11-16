@@ -380,6 +380,31 @@ jobs:
       - name: Run Signature round-trip tests
         run: ./build/tests/test_sig
 
+  interop:
+    name: Interoperability (OpenSSL >= 3.5, ML-DSA / SLH-DSA)
+    # Signs with libpqc and verifies with OpenSSL, and the reverse, for every
+    # ML-DSA and SLH-DSA parameter set, with and without a context string.
+    # A round-trip test cannot see a defect that sign and verify share; this
+    # can. Ubuntu runners ship OpenSSL 3.0, which has neither algorithm, so
+    # this job uses Homebrew's openssl@3 and runs the driver directly: under
+    # ctest a missing algorithm is "skipped" (exit 77), which here must fail.
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install ninja openssl@3
+      - name: Build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
+          cmake --build build --target pqc_sig_tool
+      - name: Cross-check against OpenSSL
+        run: |
+          set -euo pipefail
+          OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+          "$OPENSSL" version
+          python3 tests/interop/openssl_interop.py build/tests/pqc_sig_tool --openssl "$OPENSSL"
+
   benchmarks:
     name: Performance Benchmarks
     runs-on: ubuntu-latest

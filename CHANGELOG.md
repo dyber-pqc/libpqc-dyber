@@ -5,6 +5,101 @@ All notable changes to libpqc-dyber will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 0.3.0
+
+ML-DSA and SLH-DSA now implement FIPS 204 and FIPS 205. Before this
+release neither interoperated with any other implementation. Their
+signatures verified under libpqc-dyber, because signing and verification
+shared the same deviations, and verified nowhere else. Both are now
+checked against OpenSSL 3.5 in both directions, for every parameter set,
+with and without a context string.
+
+**This release changes signature bytes and, for SLH-DSA, public keys.**
+
+- ML-DSA keys are unchanged. Signatures made by 0.2.x do not verify under
+  0.3.0, and the reverse.
+- SLH-DSA keys must be regenerated: `PK.root` is a function of the
+  address layout, which changed. Signatures do not carry over either.
+- `ML-DSA-65+Ed25519` and `ML-DSA-87+P256` signatures change with their
+  ML-DSA half.
+- The `SPHINCS+-*` names share the SLH-DSA core, so their keys and
+  signatures change too. They sign without the FIPS 205 message prefix
+  and take no context string. Their conformance to SPHINCS+ round 3 is
+  not tested; use the `SLH-DSA-*` names.
+
+Reported by Conner (Spartan8806). Testing his findings against OpenSSL
+turned up the SLH-DSA address-layout and SHA-2 defects below, which a
+round-trip test could not see.
+
+### Security
+
+- **ML-DSA signed the message without the FIPS 204 section 5.2 prefix.**
+  `mu` was computed as `H(tr || M)`, which is ML-DSA.Sign_internal on the
+  raw message. ML-DSA.Sign hashes `M' = 0x00 || len(ctx) || ctx || M`.
+  The leading `0x00` separates pure ML-DSA from HashML-DSA, and the
+  context string is how an application stops a signature made for one
+  purpose being accepted for another. Without the prefix there was
+  neither, and no conformant verifier accepted the signatures. The
+  lattice arithmetic was correct.
+- **SLH-DSA signed the message without the FIPS 205 section 10.2
+  prefix**: the same omission, in `slh_sign` / `slh_verify`.
+- **SLH-DSA cleared the FORS and WOTS+ key-pair address.**
+  `slhdsa_set_type()` is a correct setTypeAndClear, but FIPS 205
+  Algorithms 6, 7, 8, 14, 15 and 17 restore the key-pair address right
+  after it, and this code did not. Every FORS instance depended on
+  `idx_tree` alone and was the same across all 2^h' leaves of a layer-0
+  tree, so distinct FORS few-time key pairs fell from 2^h to 2^(h-h'):
+  512 times more reuse for 128s and 192s, and 8 times for 128f and 192f.
+  The same defect class as the XMSS leaf index fixed in 0.2.0.
+- **SLH-DSA `H_msg` produced one byte too few** in 8 of the 12 parameter
+  sets. It emitted `ceil((k*a + h) / 8)` bytes, while the digest split
+  reads `m = ceil(k*a/8) + ceil((h-h/d)/8) + ceil((h/d)/8)`. The missing
+  byte, zeroed by the caller, was the top of `idx_leaf`: 128f and 256f
+  signed with layer-0 leaf 0 only, and 128s and 192s reached 2 of 512
+  leaves.
+- **SLH-DSA used its own ADRS layout.** FIPS 205 section 4.2 gives the
+  tree address 12 bytes. This code gave it 8, which put type, key pair,
+  chain and hash four bytes early and left the last word always zero.
+  Every tweakable hash input in all twelve parameter sets differed from
+  the standard.
+- **SLH-DSA-SHA2 did not compress the address.** FIPS 205 section 11.2
+  hashes the 22-byte ADRSc; this code hashed the full 32-byte ADRS. A
+  comment described this as a simplification.
+- **SLH-DSA-SHA2 at security categories 3 and 5 computed F with
+  SHA-512.** Section 11.2.2 moves only H and T_l to SHA-512; F and PRF
+  stay on SHA-256.
+- **SLH-DSA-SHA2 `H_msg` seeded MGF1 with the inner hash alone.** The
+  standard seeds it with `R || PK.seed || SHA-x(R || PK.seed || PK.root
+  || M)`.
+
+### Added
+
+- `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
+  context string of up to 255 bytes. `pqc_sig_sign()` and
+  `pqc_sig_verify()` are these with an empty context. For an algorithm
+  with no context input, a non-empty context returns
+  `PQC_ERROR_NOT_SUPPORTED` rather than being dropped.
+- `tests/interop/`: a small command-line front end to the signature API,
+  and `openssl_interop.py`, which signs with libpqc-dyber and verifies
+  with OpenSSL and the reverse, for all 3 ML-DSA and 12 SLH-DSA parameter
+  sets, with and without a context. It also checks that a signature is
+  rejected under a different context by both implementations. 90 checks.
+  As negative controls: with the old ML-DSA message hashing put back, 15
+  of the 18 ML-DSA checks fail; with the old SLH-DSA address layout and
+  SHA-2 hashing, all 48 cross-implementation SLH-DSA checks fail.
+  Registered with ctest under the `interop`
+  label (skipped where OpenSSL lacks the algorithms), and run in a new CI
+  job against Homebrew's OpenSSL, where a skip counts as a failure.
+- `test_security_audit`: an SLH-DSA invariant group. Distinct key-pair
+  indices must give distinct FORS and WOTS+ public keys, the caller's
+  key-pair address must survive a call, and `H_msg` must write exactly m
+  bytes. Also a context-string group for the new API.
+
+### Changed
+
+- SLH-DSA PRF_msg with SHA-256 now streams the message instead of copying
+  messages under 64 KiB into a stack buffer first.
+
 ## [0.2.1] - 2026-11-10
 
 This is a security release. The classical half of every hybrid scheme —

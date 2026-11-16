@@ -339,8 +339,8 @@ static void test_slhdsa_invariants(void)
          * so any byte it leaves unwritten differs between them. */
         memset(h_a, 0x00, sizeof(h_a));
         memset(h_b, 0xFF, sizeof(h_b));
-        slhdsa_hash_msg(h_a, R, pk, msg, sizeof(msg), p);
-        slhdsa_hash_msg(h_b, R, pk, msg, sizeof(msg), p);
+        slhdsa_hash_msg(h_a, R, pk, NULL, 0, msg, sizeof(msg), p);
+        slhdsa_hash_msg(h_b, R, pk, NULL, 0, msg, sizeof(msg), p);
         hmsg_exact = memcmp(h_a, h_b, m) == 0 && h_a[m] != h_b[m];
 
         snprintf(label, sizeof(label),
@@ -652,6 +652,101 @@ static void test_kem_implicit_rejection(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* [9] FIPS 204 / FIPS 205 context strings                              */
+/*                                                                      */
+/* Until 0.3.0, ML-DSA and SLH-DSA signed M itself (the *_internal      */
+/* functions) instead of M' = 0x00 || |ctx| || ctx || M, so they did    */
+/* not interoperate and could not bind a context. Conformance is        */
+/* checked against OpenSSL by tests/interop; this checks the API.       */
+/* ------------------------------------------------------------------ */
+
+static void test_sig_context(void)
+{
+    static const char *ctx_algs[] = { PQC_SIG_ML_DSA_44, PQC_SIG_SLH_DSA_SHAKE_128F };
+    static const uint8_t msg[] = "context binding";
+    static uint8_t ctx255[256];
+    const uint8_t ctx_a[] = "purpose-a", ctx_b[] = "purpose-b";
+    char label[160];
+    size_t i;
+
+    printf("\n[9] Context strings (FIPS 204 sec. 5.2 / FIPS 205 sec. 10.2)\n");
+    memset(ctx255, 0x5A, sizeof ctx255);
+
+    for (i = 0; i < sizeof ctx_algs / sizeof ctx_algs[0]; i++) {
+        PQC_SIG *sig = pqc_sig_new(ctx_algs[i]);
+        uint8_t *pk, *sk, *s1, *s2;
+        size_t l1 = 0, l2 = 0;
+
+        if (!sig) { check(0, ctx_algs[i]); continue; }
+        pk = malloc(pqc_sig_public_key_size(sig));
+        sk = malloc(pqc_sig_secret_key_size(sig));
+        s1 = malloc(pqc_sig_max_signature_size(sig));
+        s2 = malloc(pqc_sig_max_signature_size(sig));
+        if (!pk || !sk || !s1 || !s2 || pqc_sig_keygen(sig, pk, sk) != PQC_OK) {
+            check(0, "setup");
+        } else {
+            /* Plain API == empty context, in both directions. */
+            pqc_sig_sign(sig, s1, &l1, msg, sizeof msg, sk);
+            pqc_sig_sign_ctx(sig, s2, &l2, msg, sizeof msg, NULL, 0, sk);
+            snprintf(label, sizeof label, "%s: pqc_sig_sign verifies as empty ctx", ctx_algs[i]);
+            check(pqc_sig_verify_ctx(sig, msg, sizeof msg, NULL, 0, s1, l1, pk) == PQC_OK, label);
+            snprintf(label, sizeof label, "%s: empty-ctx signature verifies via pqc_sig_verify", ctx_algs[i]);
+            check(pqc_sig_verify(sig, msg, sizeof msg, s2, l2, pk) == PQC_OK, label);
+
+            /* A context is bound into the signature. */
+            check(pqc_sig_sign_ctx(sig, s1, &l1, msg, sizeof msg,
+                                   ctx_a, sizeof ctx_a - 1, sk) == PQC_OK, "sign with ctx");
+            snprintf(label, sizeof label, "%s: verifies under the same ctx", ctx_algs[i]);
+            check(pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx_a, sizeof ctx_a - 1,
+                                     s1, l1, pk) == PQC_OK, label);
+            snprintf(label, sizeof label, "%s: rejected under a different ctx", ctx_algs[i]);
+            check(pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx_b, sizeof ctx_b - 1,
+                                     s1, l1, pk) == PQC_ERROR_VERIFICATION_FAILED, label);
+            snprintf(label, sizeof label, "%s: rejected with no ctx", ctx_algs[i]);
+            check(pqc_sig_verify(sig, msg, sizeof msg, s1, l1, pk)
+                  == PQC_ERROR_VERIFICATION_FAILED, label);
+
+            /* Length limits: 255 is the maximum, 256 is refused. */
+            snprintf(label, sizeof label, "%s: 255-byte ctx round-trips", ctx_algs[i]);
+            check(pqc_sig_sign_ctx(sig, s1, &l1, msg, sizeof msg, ctx255, 255, sk) == PQC_OK &&
+                  pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx255, 255, s1, l1, pk) == PQC_OK,
+                  label);
+            snprintf(label, sizeof label, "%s: 256-byte ctx refused (sign) / false (verify)", ctx_algs[i]);
+            check(pqc_sig_sign_ctx(sig, s2, &l2, msg, sizeof msg, ctx255, 256, sk)
+                      == PQC_ERROR_INVALID_ARGUMENT &&
+                  pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx255, 256, s1, l1, pk)
+                      == PQC_ERROR_VERIFICATION_FAILED,
+                  label);
+        }
+        free(pk); free(sk); free(s1); free(s2);
+        pqc_sig_free(sig);
+    }
+
+    /* A scheme with no context input must not silently drop one. SPHINCS+
+     * round 3 is the same code as SLH-DSA without the M' prefix. */
+    {
+        PQC_SIG *sig = pqc_sig_new(PQC_SIG_SPHINCS_SHAKE_128F);
+        if (sig) {
+            uint8_t *pk = malloc(pqc_sig_public_key_size(sig));
+            uint8_t *sk = malloc(pqc_sig_secret_key_size(sig));
+            uint8_t *sg = malloc(pqc_sig_max_signature_size(sig));
+            size_t l = 0;
+            if (pk && sk && sg && pqc_sig_keygen(sig, pk, sk) == PQC_OK) {
+                check(pqc_sig_sign_ctx(sig, sg, &l, msg, sizeof msg,
+                                       ctx_a, sizeof ctx_a - 1, sk)
+                          == PQC_ERROR_NOT_SUPPORTED,
+                      "SPHINCS+ (no ctx input): non-empty ctx -> NOT_SUPPORTED");
+                check(pqc_sig_sign_ctx(sig, sg, &l, msg, sizeof msg, NULL, 0, sk) == PQC_OK &&
+                      pqc_sig_verify(sig, msg, sizeof msg, sg, l, pk) == PQC_OK,
+                      "SPHINCS+ (no ctx input): empty ctx == plain sign");
+            }
+            free(pk); free(sk); free(sg);
+            pqc_sig_free(sig);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Compile-time size consistency                                        */
 /* ------------------------------------------------------------------ */
 
@@ -697,6 +792,7 @@ int main(int argc, char **argv)
     RUN("stateful",test_stateful_roundtrip);
     RUN("veriflen",test_verify_length_validation);
     RUN("kem",     test_kem_implicit_rejection);
+    RUN("ctx",     test_sig_context);
 
     pqc_cleanup();
 

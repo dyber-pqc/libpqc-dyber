@@ -114,3 +114,21 @@ if(PQC_BUILD_BENCHMARKS)
         target_link_libraries(bench_all PRIVATE psapi)
     endif()
 endif()
+
+# Interoperability with an independent implementation (OpenSSL >= 3.5).
+# Labelled "interop", not "kat": it needs an external OpenSSL, and returns
+# 77 (skipped) where that OpenSSL lacks ML-DSA / SLH-DSA.
+add_executable(pqc_sig_tool interop/pqc_sig_tool.c)
+target_link_libraries(pqc_sig_tool PRIVATE pqc_static)
+target_include_directories(pqc_sig_tool PRIVATE ${PQC_INCLUDE_DIRS})
+find_package(Python3 COMPONENTS Interpreter QUIET)
+find_program(PQC_OPENSSL_EXECUTABLE openssl)
+if(Python3_Interpreter_FOUND AND PQC_OPENSSL_EXECUTABLE)
+    add_test(NAME test_openssl_interop
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/interop/openssl_interop.py
+                     $<TARGET_FILE:pqc_sig_tool>
+                     --openssl ${PQC_OPENSSL_EXECUTABLE})
+    set_tests_properties(test_openssl_interop PROPERTIES
+                         TIMEOUT 900 LABELS interop SKIP_RETURN_CODE 77)
+endif()

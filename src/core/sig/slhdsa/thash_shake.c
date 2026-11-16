@@ -69,6 +69,7 @@ void slhdsa_prf_shake(uint8_t *out,
 void slhdsa_prf_msg_shake(uint8_t *out,
                            const uint8_t *sk_prf,
                            const uint8_t *opt_rand,
+                           const uint8_t *pfx, size_t pfxlen,
                            const uint8_t *msg, size_t msglen,
                            const slhdsa_params_t *p)
 {
@@ -78,6 +79,8 @@ void slhdsa_prf_msg_shake(uint8_t *out,
     pqc_shake256_init(&ctx);
     pqc_shake256_absorb(&ctx, sk_prf, n);
     pqc_shake256_absorb(&ctx, opt_rand, n);
+    if (pfxlen)
+        pqc_shake256_absorb(&ctx, pfx, pfxlen);
     pqc_shake256_absorb(&ctx, msg, msglen);
     pqc_shake256_finalize(&ctx);
     pqc_shake256_squeeze(&ctx, out, n);
@@ -92,6 +95,7 @@ void slhdsa_prf_msg_shake(uint8_t *out,
 void slhdsa_hash_msg_shake(uint8_t *out,
                             const uint8_t *r,
                             const uint8_t *pk,
+                            const uint8_t *pfx, size_t pfxlen,
                             const uint8_t *msg, size_t msglen,
                             const slhdsa_params_t *p)
 {
@@ -103,6 +107,8 @@ void slhdsa_hash_msg_shake(uint8_t *out,
     pqc_shake256_absorb(&ctx, r, n);
     pqc_shake256_absorb(&ctx, pk, n);          /* PK.seed */
     pqc_shake256_absorb(&ctx, pk + n, n);      /* PK.root */
+    if (pfxlen)
+        pqc_shake256_absorb(&ctx, pfx, pfxlen);
     pqc_shake256_absorb(&ctx, msg, msglen);
     pqc_shake256_finalize(&ctx);
     pqc_shake256_squeeze(&ctx, out, digest_bytes);

@@ -35,6 +35,9 @@ What CI verifies:
 - Published known-answer vectors for the hash layer (FIPS 180-4, FIPS 202,
   RFC 4231) and for the classical primitives used by the hybrid schemes
   (RFC 7748, RFC 8032, RFC 6979, NIST CAVP)
+- Interoperability of ML-DSA and SLH-DSA with OpenSSL (3.5 or later), in
+  both directions, for every parameter set, with and without a context
+  string
 - Round-trip tests, and a regression suite asserting the specific invariant
   behind each previously reported defect
 - Zero-warning builds, reproducible builds, and static analysis
@@ -53,9 +56,9 @@ Secret key material is zeroized on deallocation.
 
 ## Implementation status
 
-ML-KEM (FIPS 203), ML-DSA (FIPS 204), the hash layer and, as of 0.2.1, the
-classical halves of the hybrid schemes are tested against independent
-references. Several other algorithm families are incomplete. The "Known
+ML-KEM (FIPS 203), the hash layer and, as of 0.2.1, the classical halves of
+the hybrid schemes are tested against independent references; so, as of
+0.3.0, are ML-DSA (FIPS 204) and SLH-DSA (FIPS 205). Several other algorithm families are incomplete. The "Known
 issues" section of CHANGELOG.md is the maintained list; it is kept specific
 on purpose, because a general statement that some algorithms are "being
 filled in" is too easy to misread.

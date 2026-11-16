@@ -87,6 +87,39 @@ PQC_API pqc_status_t pqc_sig_verify(const PQC_SIG *sig,
                                      const uint8_t *public_key);
 
 /*
+ * Sign / verify with a context string.
+ *
+ * ML-DSA (FIPS 204) and SLH-DSA (FIPS 205) sign the message together with a
+ * context string of 0 to 255 bytes chosen by the application, so that a
+ * signature made for one purpose cannot be replayed as valid for another.
+ * pqc_sig_sign() / pqc_sig_verify() are these functions with an empty
+ * context.
+ *
+ * For algorithms without a context input, an empty context is accepted and
+ * behaves exactly like pqc_sig_sign() / pqc_sig_verify(); a non-empty one
+ * returns PQC_ERROR_NOT_SUPPORTED rather than being silently ignored.
+ * A context longer than 255 bytes is PQC_ERROR_INVALID_ARGUMENT when
+ * signing and PQC_ERROR_VERIFICATION_FAILED when verifying.
+ */
+PQC_API pqc_status_t pqc_sig_sign_ctx(const PQC_SIG *sig,
+                                       uint8_t *signature,
+                                       size_t *signature_len,
+                                       const uint8_t *message,
+                                       size_t message_len,
+                                       const uint8_t *context,
+                                       size_t context_len,
+                                       const uint8_t *secret_key);
+
+PQC_API pqc_status_t pqc_sig_verify_ctx(const PQC_SIG *sig,
+                                         const uint8_t *message,
+                                         size_t message_len,
+                                         const uint8_t *context,
+                                         size_t context_len,
+                                         const uint8_t *signature,
+                                         size_t signature_len,
+                                         const uint8_t *public_key);
+
+/*
  * Sign with stateful scheme (updates secret_key state).
  * Only valid for stateful algorithms (LMS, XMSS).
  * The secret_key is modified in-place to advance the state.
