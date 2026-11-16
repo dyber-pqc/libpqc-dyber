@@ -342,7 +342,7 @@ jobs:
   # ============================================================
 
   kat-validation:
-    name: KAT Vector Validation
+    name: Known-Answer & Round-Trip Validation
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: build-linux
@@ -354,10 +354,27 @@ jobs:
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
           cmake --build build
-      - name: Run KAT tests
-        run: ctest --test-dir build --output-on-failure -R "kat" || echo "No KAT tests registered yet"
-      - name: Run hash vector tests
-        run: ./build/tests/test_hash
+      # This step used to be:
+      #   ctest -R "kat" || echo "No KAT tests registered yet"
+      # No test name matched "kat", so ctest selected nothing and the
+      # `|| echo` swallowed the empty result: the job reported green having
+      # validated no vectors at all. It now selects by the "kat" ctest label
+      # and fails if that selection is empty, so a vector suite cannot drop
+      # out of the run silently.
+      #
+      # Labelled today: test_hash (FIPS 180-4, FIPS 202, RFC 4231) and
+      # test_hybrid_classical (RFC 7748, RFC 8032, RFC 6979, NIST CAVP).
+      # There are not yet vectors for the post-quantum algorithms.
+      - name: Run known-answer vector tests
+        run: |
+          set -euo pipefail
+          count=$(ctest --test-dir build -N -L kat | sed -n 's/^Total Tests: //p')
+          echo "Known-answer test suites selected: ${count:-0}"
+          if [ "${count:-0}" -eq 0 ]; then
+            echo "::error::No tests carry the 'kat' label. Do not mask this with '|| echo'."
+            exit 1
+          fi
+          ctest --test-dir build --output-on-failure -L kat
       - name: Run KEM round-trip tests
         run: ./build/tests/test_kem
       - name: Run Signature round-trip tests

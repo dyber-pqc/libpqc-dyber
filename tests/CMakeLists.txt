@@ -20,7 +20,8 @@ add_executable(test_hash unit/test_hash.c)
 target_link_libraries(test_hash PRIVATE pqc_static)
 target_include_directories(test_hash PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_hash COMMAND test_hash)
-set_tests_properties(test_hash PROPERTIES TIMEOUT 30)
+# Labelled "kat": checks published FIPS 180-4, FIPS 202 and RFC 4231 vectors.
+set_tests_properties(test_hash PROPERTIES TIMEOUT 30 LABELS kat)
 
 # Integration tests
 add_executable(test_integration integration/test_roundtrip.c)
@@ -67,7 +68,7 @@ if(PQC_ENABLE_HYBRID)
         ${PQC_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src)
     add_test(NAME test_hybrid_classical COMMAND test_hybrid_classical)
-    set_tests_properties(test_hybrid_classical PROPERTIES TIMEOUT 300)
+    set_tests_properties(test_hybrid_classical PROPERTIES TIMEOUT 300 LABELS kat)
 endif()
 
 # Benchmarks (not added to CTest by default)
