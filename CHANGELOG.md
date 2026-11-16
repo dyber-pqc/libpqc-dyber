@@ -247,6 +247,28 @@ Found by the new fuzz targets (see Added):
   acvp_mlkem_to_kat.py` regenerates it from the ACVP JSON. Key
   generation, encapsulation and decapsulation passed all 180 vectors
   unchanged; the key checks found the defect above.
+- **Known-answer tests for ML-DSA and SLH-DSA**, from NIST's ACVP
+  vectors for FIPS 204 and 205 (same source and pinned commit).
+  `tests/kat/test_kat_sig_acvp` runs key generation from the seeds,
+  deterministic and hedged signing, and verification (including the
+  invalid signatures), through `pqc_sig_sign_ctx` /
+  `pqc_sig_verify_ctx`, feeding seeds and signing randomness through the
+  RNG hook and failing if the library draws other than the specified
+  number of bytes. ML-DSA: 210 vectors (75 key generation, 90 signing,
+  45 verification); SLH-DSA: 344 (120, 168, 56). All passed with no
+  library changes, which confirms the 0.3.0 FIPS 204 / 205 fixes against
+  NIST rather than only OpenSSL. With ML-DSA's domain-separation byte
+  changed from 0x00 to 0x01, all 90 signing vectors fail.
+
+  Not run, because the library has no API for them: the internal
+  interface, HashML-DSA / HashSLH-DSA (pre-hash) and ML-DSA's
+  external-mu groups. The vector files' headers count them. SLH-DSA
+  verification vectors carry whole signatures (about 10 MB as hex for
+  all sets), so `tests/kat/slhdsa_acvp.txt` keeps those for the four
+  128-bit parameter sets only (56 of 168); `tests/kat/tools/
+  acvp_sig_to_kat.py` can regenerate the full set. ctest runs one
+  SLH-DSA signing vector per parameter set; the CI known-answer job runs
+  all 168. The two vector files are 2.3 and 3.4 MB.
 
 - `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
   context string of up to 255 bytes. `pqc_sig_sign()` and

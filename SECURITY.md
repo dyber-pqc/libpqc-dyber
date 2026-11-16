@@ -49,6 +49,9 @@ What CI verifies:
 - ML-KEM against NIST's ACVP vectors for FIPS 203 (key generation,
   encapsulation, decapsulation and the section 7.2 / 7.3 input checks;
   240 tests)
+- ML-DSA and SLH-DSA against NIST's ACVP vectors for FIPS 204 and 205
+  (key generation, deterministic and hedged signing, verification;
+  210 and 344 tests, through the pure external interface)
 - BIKE against all 300 official round 4 known-answer vectors, by
   regenerating NIST's response files with its DRBG (`tests/kat/`)
 - Round-trip tests, and a regression suite asserting the specific invariant
@@ -60,8 +63,11 @@ Design intent that CI does **not** yet verify:
 - Constant-time execution of HQC, which the ctgrind run shows it does
   not have, and of the algorithm families that are not yet functionally
   correct.
-- Known-answer vectors for the post-quantum algorithms other than ML-KEM
-  and BIKE. ML-DSA and SLH-DSA are cross-checked against OpenSSL instead.
+- Known-answer vectors for the post-quantum algorithms other than ML-KEM,
+  ML-DSA, SLH-DSA and BIKE.
+- HashML-DSA / HashSLH-DSA (pre-hash signing), which is not implemented,
+  and the internal and external-mu signing interfaces, which are not
+  exposed, so their ACVP vectors cannot be run.
 - Deep fuzzing. CI fuzzes signature verification and KEM decapsulation /
   encapsulation for 10 minutes per target per run (`tests/fuzz/`); that
   is a smoke test, not continuous fuzzing. A few algorithms are fuzzed

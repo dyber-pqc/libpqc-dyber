@@ -223,7 +223,7 @@ jobs:
             # interop test (label "interop") signs with every SLH-DSA
             # parameter set through an instrumented tool and has its own job.
             ctest --test-dir build --output-on-failure --timeout 1800 \
-              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick" \
+              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa" \
               --label-exclude interop
           else
             ctest --test-dir build --output-on-failure --timeout 1800
@@ -408,9 +408,12 @@ jobs:
       # and fails if that selection is empty, so a vector suite cannot drop
       # out of the run silently.
       #
-      # Labelled today: test_hash (FIPS 180-4, FIPS 202, RFC 4231) and
-      # test_hybrid_classical (RFC 7748, RFC 8032, RFC 6979, NIST CAVP).
-      # There are not yet vectors for the post-quantum algorithms.
+      # Labelled today: test_hash (FIPS 180-4, FIPS 202, RFC 4231),
+      # test_hybrid_classical (RFC 7748, RFC 8032, RFC 6979, NIST CAVP),
+      # test_kat_bike (official round 4 KATs), and test_kat_mlkem,
+      # test_kat_mldsa and test_kat_slhdsa (NIST ACVP vectors for FIPS
+      # 203, 204 and 205). test_kat_slhdsa runs one signing vector per
+      # parameter set; the next step runs all of them.
       - name: Run known-answer vector tests
         run: |
           set -euo pipefail
@@ -421,6 +424,8 @@ jobs:
             exit 1
           fi
           ctest --test-dir build --output-on-failure -L kat
+      - name: Run every SLH-DSA ACVP signing vector
+        run: ./build/tests/test_kat_sig_acvp tests/kat/slhdsa_acvp.txt
       - name: Run KEM round-trip tests
         run: ./build/tests/test_kem
       - name: Run Signature round-trip tests
