@@ -57,8 +57,11 @@ Design intent that CI does **not** yet verify:
   functionally correct.
 - Known-answer vectors for the post-quantum algorithms themselves. None are
   in the repository yet.
-- Fuzzing. The CI job builds with libFuzzer instrumentation but there are
-  no fuzz targets yet.
+- Deep fuzzing. CI fuzzes signature verification and KEM decapsulation /
+  encapsulation for 10 minutes per target per run (`tests/fuzz/`); that
+  is a smoke test, not continuous fuzzing. BIKE decapsulation is not
+  fuzzed because it is too slow (CHANGELOG known issues), and a few
+  algorithms are fuzzed with attacker-chosen keys only.
 
 Secret key material is zeroized on deallocation.
 

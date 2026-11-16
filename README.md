@@ -850,11 +850,13 @@ What CI checks today:
 - AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind memcheck
   across the test suite, and MemorySanitizer on the suites fast enough
   to finish under it
+- Fuzzing of signature verification and KEM decapsulation / encapsulation
+  for every algorithm with libFuzzer, under AddressSanitizer and
+  UndefinedBehaviorSanitizer (`tests/fuzz/`), 10 minutes per target per
+  run with a corpus kept between runs
 
 Not yet in place: NIST known-answer vectors for the post-quantum
-algorithms themselves (`tests/kat/` is empty), and fuzz targets (the CI
-fuzzing job builds with libFuzzer instrumentation but has no targets to
-run).
+algorithms themselves (`tests/kat/` is empty).
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 

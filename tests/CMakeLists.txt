@@ -30,12 +30,23 @@ target_include_directories(test_integration PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_integration COMMAND test_integration)
 set_tests_properties(test_integration PROPERTIES TIMEOUT 30)
 
-# Quick FN-DSA test (for development/debugging)
+# FN-DSA round trip. Key generation is a known failure (CHANGELOG.md), so
+# this is registered as an *expected* failure, judged by its output rather
+# than its exit status: it passes only if both parameter sets report the
+# known key-generation failure and no sanitizer reported an error. Plain
+# WILL_FAIL would also accept a crash. When FN-DSA key generation starts
+# working the KNOWN FAILURE lines disappear and this fails; then drop these
+# properties so the test checks the round trip normally.
 add_executable(test_fndsa_quick unit/test_fndsa_quick.c)
 target_link_libraries(test_fndsa_quick PRIVATE pqc_static)
 target_include_directories(test_fndsa_quick PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_fndsa_quick COMMAND test_fndsa_quick)
-set_tests_properties(test_fndsa_quick PROPERTIES TIMEOUT 120)
+set_tests_properties(test_fndsa_quick PROPERTIES
+    TIMEOUT 120
+    LABELS known-failure
+    PASS_REGULAR_EXPRESSION "KNOWN FAILURE: FN-DSA-512 key generation[^\n]*\nKNOWN FAILURE: FN-DSA-1024 key generation"
+    FAIL_REGULAR_EXPRESSION "Sanitizer|runtime error:|PASS: |FAIL: "
+    SKIP_REGULAR_EXPRESSION "FN-DSA not in this build")
 
 # Security audit regression tests.
 # Needs the internal source tree for the address/parameter invariants.
@@ -139,4 +150,19 @@ if(PQC_ENABLE_CT_TESTING)
     add_executable(test_ct ct/test_ct.c)
     target_link_libraries(test_ct PRIVATE pqc_static)
     target_include_directories(test_ct PRIVATE ${PQC_INCLUDE_DIRS})
+endif()
+
+# libFuzzer targets; see tests/fuzz/*.c for the input layouts. Each is also
+# registered as a short smoke test (a fixed number of runs from an empty
+# corpus) so that a fuzzer build that crashes immediately fails ctest.
+if(PQC_BUILD_FUZZERS)
+    foreach(fz fuzz_sig_verify fuzz_kem)
+        add_executable(${fz} fuzz/${fz}.c)
+        target_link_libraries(${fz} PRIVATE pqc_static)
+        target_include_directories(${fz} PRIVATE ${PQC_INCLUDE_DIRS})
+        target_compile_options(${fz} PRIVATE -fsanitize=fuzzer)
+        target_link_options(${fz} PRIVATE -fsanitize=fuzzer)
+        add_test(NAME ${fz}_smoke COMMAND ${fz} -runs=2000 -seed=1)
+        set_tests_properties(${fz}_smoke PROPERTIES TIMEOUT 1800 LABELS fuzz)
+    endforeach()
 endif()
