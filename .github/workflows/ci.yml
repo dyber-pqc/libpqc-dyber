@@ -573,6 +573,10 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          # Keep downloaded Maven plugins between runs: every run fetching
+          # them from Maven Central is how this job got rate-limited (429).
+          cache: 'maven'
+          cache-dependency-path: bindings/java/pom.xml
       - name: Build and install core library
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -594,7 +598,23 @@ jobs:
             src/main/native/com_dyber_pqc_PQC.c \
             -o libpqc_jni.so -lpqc
       - name: Test Java bindings
-        run: cd bindings/java && mvn test -DargLine="-Djava.library.path=$PWD"
+        # Retried only when Maven reports that it could not download from
+        # the repository (Maven Central answers 429 under load). A test or
+        # build failure is never retried.
+        run: |
+          set -o pipefail
+          cd bindings/java
+          for attempt in 1 2 3; do
+            if mvn -B test -DargLine="-Djava.library.path=$PWD" 2>&1 | tee mvn.log; then
+              exit 0
+            fi
+            if ! grep -qE "Could not transfer artifact|Could not resolve dependencies|could not be resolved" mvn.log; then
+              exit 1
+            fi
+            echo "Maven repository error (attempt $attempt); retrying in $((attempt * 30)) s"
+            sleep $((attempt * 30))
+          done
+          exit 1
 
   binding-csharp:
     name: C# Binding
