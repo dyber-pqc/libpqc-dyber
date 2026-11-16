@@ -72,6 +72,38 @@ void slhdsa_set_keypair_addr(uint8_t addr[32], uint32_t keypair)
     u32_to_bytes(addr + 16, keypair);
 }
 
+uint32_t slhdsa_get_keypair_addr(const uint8_t addr[32])
+{
+    return ((uint32_t)addr[16] << 24) | ((uint32_t)addr[17] << 16) |
+           ((uint32_t)addr[18] <<  8) |  (uint32_t)addr[19];
+}
+
+/*
+ * ADRS.setTypeAndClear(type) followed by
+ * ADRS.setKeyPairAddress(<the keypair address it had before>).
+ *
+ * slhdsa_set_type() is a faithful setTypeAndClear: it zeroes bytes 16..31,
+ * which includes the keypair address. FIPS 205 relies on that, but
+ * wherever it changes the type of an address that identifies a WOTS+ or
+ * FORS key pair -- Algorithms 6, 7 and 8 (WOTS_PRF, WOTS_PK) and 14, 15
+ * and 17 (FORS_PRF, FORS_TREE, FORS_ROOTS) -- it immediately restores the
+ * keypair address from the original.
+ *
+ * Calling slhdsa_set_type() alone at those points silently discards the
+ * keypair address. That made every FORS instance, and every WOTS+ public
+ * key compression, independent of which key pair it belonged to: FORS
+ * collapsed from 2^h distinct few-time instances to 2^(h - h'), and the
+ * scheme stopped interoperating with conformant implementations. Signing
+ * and verification shared the defect, so it round-tripped perfectly.
+ * This is the same shape as the XMSS leaf-index defect fixed in 0.2.0.
+ */
+void slhdsa_set_type_keep_keypair(uint8_t addr[32], uint32_t type)
+{
+    uint32_t keypair = slhdsa_get_keypair_addr(addr);
+    slhdsa_set_type(addr, type);
+    slhdsa_set_keypair_addr(addr, keypair);
+}
+
 void slhdsa_set_chain_addr(uint8_t addr[32], uint32_t chain)
 {
     u32_to_bytes(addr + 20, chain);

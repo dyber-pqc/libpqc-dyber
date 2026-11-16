@@ -49,6 +49,9 @@ target_include_directories(test_security_audit PRIVATE
 if(PQC_ENABLE_SIG_XMSS)
     target_compile_definitions(test_security_audit PRIVATE PQC_TEST_XMSS_INTERNALS=1)
 endif()
+if(PQC_ENABLE_SIG_SLHDSA)
+    target_compile_definitions(test_security_audit PRIVATE PQC_TEST_SLHDSA_INTERNALS=1)
+endif()
 add_test(NAME test_security_audit COMMAND test_security_audit)
 # The stateful-signature groups rebuild a full Merkle tree per operation
 # (XMSS re-runs treehash on every signature), which is slow enough under

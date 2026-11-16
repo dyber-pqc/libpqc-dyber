@@ -96,8 +96,7 @@ void slhdsa_hash_msg_shake(uint8_t *out,
                             const slhdsa_params_t *p)
 {
     uint32_t n = p->n;
-    size_t digest_bits = (size_t)(p->k) * p->a + p->h;
-    size_t digest_bytes = (digest_bits + 7) / 8;
+    size_t digest_bytes = slhdsa_hmsg_bytes(p);  /* FIPS 205 m; see slhdsa_params.h */
     pqc_shake256_ctx ctx;
 
     pqc_shake256_init(&ctx);

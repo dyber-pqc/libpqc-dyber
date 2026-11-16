@@ -69,9 +69,18 @@ void slhdsa_ht_sign(uint8_t *sig,
                               sk_seed, pub_seed, addr, p);
         }
 
-        /* Recover the root by walking up from the WOTS+ pk */
+        /* Recover the root by walking up from the WOTS+ pk.
+         *
+         * slhdsa_xmss_node() above ran on this same addr and left it as a
+         * HASHTREE address, so re-establish the WOTS+ address -- including
+         * the keypair address -- that slhdsa_wots_sign() used. Before the
+         * keypair address was honoured this did not matter, because it was
+         * cleared on every path; now a stale value here would make the
+         * signer compute a root the verifier never reaches. */
         {
             uint8_t wots_pk[SLHDSA_MAX_N];
+            slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+            slhdsa_set_keypair_addr(addr, idx_leaf);
             slhdsa_wots_pk_from_sig(wots_pk, sig_ptr, msg,
                                      pub_seed, addr, p);
             slhdsa_xmss_root_from_sig(root, idx_leaf, auth_path,
@@ -109,6 +118,9 @@ void slhdsa_ht_sign(uint8_t *sig,
             /* Recover the new root */
             if (layer < d - 1) {
                 uint8_t wots_pk[SLHDSA_MAX_N];
+                /* Same reason as layer 0: xmss_node() changed addr. */
+                slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+                slhdsa_set_keypair_addr(addr, leaf);
                 slhdsa_wots_pk_from_sig(wots_pk, sig_ptr, root,
                                          pub_seed, addr, p);
                 slhdsa_xmss_root_from_sig(root, leaf, auth_path,
