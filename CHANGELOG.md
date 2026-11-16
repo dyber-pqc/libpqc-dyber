@@ -12,9 +12,11 @@ release neither interoperated with any other implementation. Their
 signatures verified under libpqc-dyber, because signing and verification
 shared the same deviations, and verified nowhere else. Both are now
 checked against OpenSSL 3.5 in both directions, for every parameter set,
-with and without a context string.
+with and without a context string. BIKE now implements the round 4
+specification and reproduces its official known-answer tests.
 
-**This release changes signature bytes and, for SLH-DSA, public keys.**
+**This release changes signature bytes, SLH-DSA public keys, and
+everything BIKE produces.**
 
 - ML-DSA keys are unchanged. Signatures made by 0.2.x do not verify under
   0.3.0, and the reverse.
@@ -26,6 +28,10 @@ with and without a context string.
   signatures change too. They sign without the FIPS 205 message prefix
   and take no context string. Their conformance to SPHINCS+ round 3 is
   not tested; use the `SLH-DSA-*` names.
+- BIKE keys, ciphertexts and shared secrets all change, and the secret
+  key is now h0 || h1 || sigma as in the specification: 3114, 6198 and
+  10276 bytes at L1, L3 and L5, 32 bytes shorter than before. BIKE keys
+  must be regenerated.
 
 Reported by Conner (Spartan8806). Testing his findings against OpenSSL
 turned up the SLH-DSA address-layout and SHA-2 defects below, which a
@@ -126,18 +132,36 @@ Found by the new fuzz targets (see Added):
   constant time: the secret key positions are extracted by a full scan,
   counters for every position come from rotating the whole syndrome by
   each secret position with a masked barrel shift into bit-sliced
-  counters, and the iteration count is fixed. Decapsulation now takes
-  3.4, 9.7 and 24 ms at L1, L3 and L5, the same for valid, modified and
-  random ciphertexts. 1,000 round trips per level decoded correctly and
-  every modified ciphertext was rejected. Shared secrets for valid
-  ciphertexts, and keys, are unchanged.
+  counters, and the iteration count is fixed. 1,000 round trips per level
+  decoded correctly and every modified ciphertext was rejected.
 
   Decapsulation also chose between the real and the rejection secret
   with an `if` on a validity bit computed with `&&` -- the same oracle as
   FrodoKEM above -- and `bike_gf2x_mul` skipped zero bits of its second
   operand, the secret h0 when computing the syndrome, and reduced with a
-  branch per bit. Both are now constant time. Under ctgrind,
-  decapsulation went from 30 findings to none.
+  branch per bit. Both are now constant time.
+- **BIKE was not the BIKE KEM.** The code in `src/core/kem/bike` sampled
+  the error vector directly, sent H(e) as the second ciphertext component,
+  keyed on e, and stored an extra seed in the secret key; the
+  specification samples a message m, derives e = H(m), sends m XOR L(e),
+  and keys on m. Hashes and samplers differed too. Nothing it produced
+  interoperated with BIKE. It now follows Table 3 of the round 4
+  specification (v5.1): Algorithm 3 (WSHAKE256-PRF) for keys and errors,
+  L and K as SHA3-384, implicit rejection to K(sigma, c), and the
+  specified key and ciphertext encodings, and it reproduces all 300
+  official known-answer vectors byte for byte (see Added).
+
+  Key generation and encapsulation are now constant time as well. Key
+  generation inverted h0 with a variable-time extended Euclid; it now
+  uses Fermat's little theorem with the Itoh-Tsujii chain over a
+  Karatsuba multiplier with a masked carry-less product. Algorithm 3 is
+  implemented with masked duplicate checks and a scatter that visits
+  every word. Under ctgrind BIKE went from 30 findings per parameter set
+  (in key generation, encapsulation and decapsulation) to none, and it is
+  now in the CI gate. In a gcc -O2 release build, key generation takes
+  15, 53 and 109 ms at L1, L3 and L5, encapsulation 0.9, 3.1 and 6.1 ms,
+  and decapsulation 5, 16 and 34 ms whatever the ciphertext; before, a
+  malformed ciphertext took 22 to 148 s to decapsulate.
 
 ### Added
 
@@ -159,7 +183,7 @@ Found by the new fuzz targets (see Added):
   7 and 17, FrodoKEM 1 that hid 2 more behind it, and SLH-DSA, SPHINCS+,
   XMSS and LMS 1 to 3 each. All of those are now clean, and
   `tests/ct/ct_gate.txt` lists them: ML-KEM, ML-DSA, SLH-DSA, the four
-  hybrids, FrodoKEM, LMS-SHA256-H10 and XMSS-SHA2-10-256. CI fails if any
+  hybrids, BIKE, FrodoKEM, LMS-SHA256-H10 and XMSS-SHA2-10-256. CI fails if any
   of them regresses. Every other algorithm is run weekly and reported;
   see Known issues.
 
@@ -185,6 +209,18 @@ Found by the new fuzz targets (see Added):
   slow under ASan to set up per process (Classic McEliece, the larger
   LMS and XMSS trees, the SLH-DSA/SPHINCS+ SHAKE "s" sets) and FN-DSA
   are fuzzed with attacker-chosen keys only.
+- **Known-answer tests for BIKE**, the first for a post-quantum algorithm
+  in this repository. `tests/kat/test_kat_bike` regenerates the complete
+  NIST response file for each level -- 100 vectors from NIST's AES-256
+  CTR DRBG, exactly as PQCgenKAT_kem does -- and compares its SHA-256
+  with that of the official `PQCkemKAT_BIKE_{3114,6198,10276}.rsp` from
+  NIST's round 4 package (BIKE-Round4.zip). Only the hashes are stored.
+  It also decapsulates every vector, and checks that a modified
+  ciphertext decapsulates to K(sigma, c'), which the KATs do not cover.
+  Taking K from the wrong half of the digest fails both. Labelled `kat`
+  in ctest. `tests/kat/nist_drbg.c` holds the DRBG and a test-only
+  AES-256 (checked against FIPS 197 C.3), for reuse by later KATs.
+- `pqc_sha3_384()`, with FIPS 202 test vectors in `test_hash`.
 
 - `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
   context string of up to 255 bytes. `pqc_sig_sign()` and
@@ -225,20 +261,13 @@ Found by the new fuzz targets (see Added):
   an error, so a memory error in FN-DSA key generation still fails CI.
   When key generation starts working the test fails, as a prompt to make
   it an ordinary one.
-- BIKE samples key and error positions with candidates masked to the
-  smallest power of two covering the range, instead of 31 bits, of which
-  about 6 in a million were accepted. Key generation went from 0.6-0.9 s
-  to 8, 28 and 82 ms at L1, L3 and L5, and encapsulation from 0.3-0.4 s
-  to 1.5, 5 and 15 ms. The distribution is unchanged.
+- BIKE's position sampler drew 31-bit candidates and rejected those out
+  of range, accepting about 6 in a million, so key generation took 0.6
+  to 0.9 s and encapsulation 0.3 to 0.4 s. It is replaced by the
+  specified Algorithm 3, which never rejects.
+- BIKE is on the round-trip allow list in `test_kem_all.c`.
 
 ### Known issues
-
-- **BIKE is not the specified KEM.** It decodes with the specified
-  decoder (above), but encapsulation samples the error vector directly,
-  sends H(e) as the second ciphertext component and derives the key from
-  e and the ciphertext. The BIKE specification samples m, derives e from
-  it, sends m XOR L(e) and derives the key from m and the ciphertext. It
-  does not interoperate with BIKE, and there are no known-answer tests.
 
 From the ctgrind run over every algorithm:
 
@@ -247,10 +276,6 @@ From the ctgrind run over every algorithm:
   sparse polynomial multiplication indexed by secret positions,
   table-based GF(2^m) arithmetic and a branching decoder. This is
   structural and left for a dedicated change.
-- **BIKE key generation and encapsulation are not constant time**
-  (decapsulation is; see Security). Polynomial inversion in key
-  generation is a variable-time extended Euclid on the secret h0, and
-  sampling key and error positions branches on and indexes by them.
 - CROSS, Classic McEliece, MAYO, NTRU, NTRU Prime, SNOVA and UOV do not
   round-trip under the check (decapsulation disagrees with encapsulation,
   or a signature does not verify), and FN-DSA key generation fails

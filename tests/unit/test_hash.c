@@ -92,6 +92,32 @@ static int test_sha3_256(void) {
     return 0;
 }
 
+static int test_sha3_384(void) {
+    /* FIPS 202 test vectors: SHA3-384("abc") and SHA3-384("") */
+    const uint8_t msg[] = "abc";
+    uint8_t hash[48];
+    uint8_t expected[48];
+
+    hex_to_bytes("ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c25"
+                 "96da7cf0e49be4b298d88cea927ac7f539f1edf228376d25",
+                 expected, 48);
+    pqc_sha3_384(hash, msg, 3);
+    if (memcmp(hash, expected, 48) != 0) {
+        printf("  FAIL: SHA3-384(\"abc\")\n");
+        return 1;
+    }
+    hex_to_bytes("0c63a75b845e4f7d01107d852e4c2485c51a50aaaa94fc61"
+                 "995e71bbee983a2ac3713831264adb47fb6bd1e058d5f004",
+                 expected, 48);
+    pqc_sha3_384(hash, msg, 0);
+    if (memcmp(hash, expected, 48) != 0) {
+        printf("  FAIL: SHA3-384(\"\")\n");
+        return 1;
+    }
+    printf("  PASS: SHA3-384\n");
+    return 0;
+}
+
 static int test_sha3_512(void) {
     /* Test vector: SHA3-512("abc") */
     const uint8_t msg[] = "abc";
@@ -164,6 +190,7 @@ int main(void) {
     failures += test_sha256();
     failures += test_sha512();
     failures += test_sha3_256();
+    failures += test_sha3_384();
     failures += test_sha3_512();
     failures += test_shake128();
     failures += test_shake256();

@@ -44,6 +44,11 @@ ML-KEM-1024+P256
 ML-DSA-65+Ed25519
 ML-DSA-87+P256
 
+# BIKE (round 4, reproduces the official KATs)
+BIKE-L1
+BIKE-L3
+BIKE-L5
+
 # FrodoKEM
 FrodoKEM-640-AES
 FrodoKEM-640-SHAKE

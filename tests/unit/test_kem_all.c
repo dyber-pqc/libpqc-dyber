@@ -23,6 +23,8 @@
 static const char *allow_list[] = {
     /* ML-KEM: verified correct via FIPS 203 */
     "ML-KEM-512", "ML-KEM-768", "ML-KEM-1024",
+    /* BIKE: reproduces the official round 4 KATs (tests/kat) */
+    "BIKE-L1", "BIKE-L3", "BIKE-L5",
     /* Hybrids: classical halves verified against RFC 7748 and NIST CAVP
      * vectors in test_hybrid_classical.c */
     "ML-KEM-768+X25519", "ML-KEM-1024+P256",

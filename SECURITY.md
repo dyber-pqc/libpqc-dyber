@@ -41,23 +41,24 @@ What CI verifies:
 - Constant-time execution, with the ctgrind approach: `tests/ct/test_ct`
   marks every byte from the RNG as undefined to Valgrind, which then
   reports any branch or memory address derived from secret data. Blocking
-  for ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, the hybrid schemes,
+  for ML-KEM, ML-DSA, SLH-DSA, BIKE, FrodoKEM, the hybrid schemes,
   LMS-SHA256-H10 and XMSS-SHA2-10-256 (`tests/ct/ct_gate.txt`); run
   weekly, and reported, for every algorithm. This covers the paths the
   test exercises in a gcc -O2 x86-64 build; it does not see
   variable-time instructions or what other compilers emit.
+- BIKE against all 300 official round 4 known-answer vectors, by
+  regenerating NIST's response files with its DRBG (`tests/kat/`)
 - Round-trip tests, and a regression suite asserting the specific invariant
   behind each previously reported defect
 - Zero-warning builds, reproducible builds, and static analysis
 
 Design intent that CI does **not** yet verify:
 
-- Constant-time execution of HQC, and of BIKE key generation and
-  encapsulation, which the ctgrind run shows they do not have (BIKE
-  decapsulation is clean), and of the algorithm families that are not
-  yet functionally correct.
-- Known-answer vectors for the post-quantum algorithms themselves. None are
-  in the repository yet.
+- Constant-time execution of HQC, which the ctgrind run shows it does
+  not have, and of the algorithm families that are not yet functionally
+  correct.
+- Known-answer vectors for the post-quantum algorithms other than BIKE,
+  ML-KEM included.
 - Deep fuzzing. CI fuzzes signature verification and KEM decapsulation /
   encapsulation for 10 minutes per target per run (`tests/fuzz/`); that
   is a smoke test, not continuous fuzzing. A few algorithms are fuzzed
@@ -70,7 +71,8 @@ Secret key material is zeroized on deallocation.
 
 ML-KEM (FIPS 203), the hash layer and, as of 0.2.1, the classical halves of
 the hybrid schemes are tested against independent references; so, as of
-0.3.0, are ML-DSA (FIPS 204) and SLH-DSA (FIPS 205). Several other algorithm families are incomplete. The "Known
+0.3.0, are ML-DSA (FIPS 204) and SLH-DSA (FIPS 205), and BIKE (round 4,
+against its official known-answer tests). Several other algorithm families are incomplete. The "Known
 issues" section of CHANGELOG.md is the maintained list; it is kept specific
 on purpose, because a general statement that some algorithms are "being
 filled in" is too easy to misread.

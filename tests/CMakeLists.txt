@@ -48,6 +48,18 @@ set_tests_properties(test_fndsa_quick PROPERTIES
     FAIL_REGULAR_EXPRESSION "Sanitizer|runtime error:|PASS: |FAIL: "
     SKIP_REGULAR_EXPRESSION "FN-DSA not in this build")
 
+# BIKE against the official round 4 KATs (see tests/kat/test_kat_bike.c).
+# Labelled "kat": regenerates the NIST response files and compares hashes.
+if(PQC_ENABLE_KEM_BIKE)
+    add_executable(test_kat_bike kat/test_kat_bike.c kat/nist_drbg.c)
+    target_link_libraries(test_kat_bike PRIVATE pqc_static)
+    target_include_directories(test_kat_bike PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME test_kat_bike COMMAND test_kat_bike)
+    set_tests_properties(test_kat_bike PROPERTIES TIMEOUT 1800 LABELS kat)
+endif()
+
 # Security audit regression tests.
 # Needs the internal source tree for the address/parameter invariants.
 add_executable(test_security_audit unit/test_security_audit.c)

@@ -70,6 +70,18 @@ void pqc_sha3_256(uint8_t out[PQC_SHA3_256_BYTES],
                                  SHA3_DOMAIN, out, PQC_SHA3_256_BYTES);
 }
 
+void pqc_sha3_384(uint8_t out[PQC_SHA3_384_BYTES],
+                   const uint8_t *in, size_t inlen)
+{
+    uint64_t state[25];
+    pqc_keccak_init(state);
+
+    size_t absorbed = inlen % PQC_SHA3_384_RATE;
+    pqc_keccak_absorb(state, PQC_SHA3_384_RATE, in, inlen);
+    keccak_finalize_and_squeeze(state, PQC_SHA3_384_RATE, absorbed,
+                                 SHA3_DOMAIN, out, PQC_SHA3_384_BYTES);
+}
+
 void pqc_sha3_512(uint8_t out[PQC_SHA3_512_BYTES],
                    const uint8_t *in, size_t inlen)
 {
