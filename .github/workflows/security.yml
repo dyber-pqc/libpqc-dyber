@@ -153,6 +153,9 @@ jobs:
         #   test_fndsa_quick    - FN-DSA key generation, same problem.
         #   test_kat_slhdsa     - SLH-DSA signing; same problem as test_sig.
         #                         It runs in full in ci.yml's KAT job.
+        #   test_kat_bike       - 300 BIKE key generations, encapsulations
+        #                         and decapsulations; exceeds 30 minutes
+        #                         under MSan. Also runs in ci.yml's KAT job.
         #   label "interop"     - OpenSSL interop signs with every SLH-DSA
         #                         parameter set; under MSan it exceeds the
         #                         timeout. It has its own job in ci.yml.
@@ -163,7 +166,7 @@ jobs:
         run: |
           ctest --test-dir build --output-on-failure \
             --timeout ${{ env.CTEST_TIMEOUT }} \
-            --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa" \
+            --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa|test_kat_bike" \
             --label-exclude interop
 
   # ============================================================
