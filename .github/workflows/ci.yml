@@ -222,8 +222,11 @@ jobs:
             # MSan. See the matching note in security.yml. The OpenSSL
             # interop test (label "interop") signs with every SLH-DSA
             # parameter set through an instrumented tool and has its own job.
+            # test_kat_slhdsa and test_kat_bike (300 BIKE key generations,
+            # encapsulations and decapsulations) exceed the timeout under
+            # MSan; both run in the KAT job and under ASan and UBSan.
             ctest --test-dir build --output-on-failure --timeout 1800 \
-              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa" \
+              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa|test_kat_bike" \
               --label-exclude interop
           else
             ctest --test-dir build --output-on-failure --timeout 1800
