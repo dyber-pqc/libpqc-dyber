@@ -86,30 +86,43 @@ void bike_gf2x_mul(uint64_t *o, const uint64_t *a, const uint64_t *b,
         return;
     }
 
+    /*
+     * Constant time in both operands: every bit of b is processed, with
+     * a mask rather than a skip. Both operands are secret somewhere --
+     * e1 in encapsulation, h0^-1 in key generation -- and skipping zero
+     * bits of b made the running time, and the sequence of memory
+     * writes, depend on them.
+     */
     for (uint32_t i = 0; i < r; i++) {
-        if (!bit_get(b, i)) continue;
-
+        uint64_t m = 0 - (uint64_t)bit_get(b, i);
         uint32_t word_off = i / 64;
         uint32_t bit_off  = i % 64;
 
-        if (bit_off == 0) {
+        if (bit_off == 0) {                       /* i is public */
             for (uint32_t j = 0; j < r_words; j++) {
-                result[word_off + j] ^= a[j];
+                result[word_off + j] ^= a[j] & m;
             }
         } else {
             for (uint32_t j = 0; j < r_words; j++) {
-                result[word_off + j]     ^= a[j] << bit_off;
-                result[word_off + j + 1] ^= a[j] >> (64 - bit_off);
+                result[word_off + j]     ^= (a[j] << bit_off) & m;
+                result[word_off + j + 1] ^= (a[j] >> (64 - bit_off)) & m;
             }
         }
     }
 
-    /* Reduce mod (x^r - 1): for bits at position p >= r, XOR into p - r */
-    for (uint32_t i = 2 * r - 1; i >= r; i--) {
-        if (bit_get(result, i)) {
-            uint32_t target = i - r;
-            bit_flip(result, target);
-            bit_flip(result, i);
+    /*
+     * Reduce mod x^r - 1: fold bits [r, 2r) onto [0, r) with word shifts
+     * (r is public). The old loop tested each high bit of the product and
+     * flipped it conditionally. Writes go to words 0..q and every read of
+     * word q happens at j = 0, before it is written.
+     */
+    {
+        uint32_t q = r / 64, sh = r % 64;
+        for (uint32_t j = 0; j < r_words; j++) {
+            uint64_t lo = result[q + j];
+            uint64_t hi = result[q + j + 1];
+            uint64_t v = sh ? (lo >> sh) | (hi << (64 - sh)) : lo;
+            result[j] ^= v;
         }
     }
 

@@ -26,6 +26,7 @@
 #include "core/common/hash/sha2.h"
 #include "bike.h"
 #include "bike_params.h"
+#include "core/common/ct_ops.h"
 
 /* ------------------------------------------------------------------ */
 /* Pack/unpack helpers                                                  */
@@ -302,7 +303,6 @@ int bike_decaps_internal(uint8_t *ss, const uint8_t *ct,
                          const uint8_t *sk,
                          const bike_params_t *params)
 {
-    uint32_t r = params->r;
     uint32_t r_words = params->r_words;
 
     uint8_t seed[BIKE_SEED_BYTES];
@@ -327,37 +327,47 @@ int bike_decaps_internal(uint8_t *ss, const uint8_t *ct,
     uint8_t c1_hash[BIKE_SHARED_SECRET_BYTES];
     bike_ct_unpack(c0, c1_hash, ct, params);
 
-    /* Compute syndrome = c0 * h0 (with block-structured approach)
-     * In BIKE, the syndrome for (c0, c1) with parity check (h0, h1) is:
-     * s = c0 * h0 mod (x^r - 1) */
-    bike_gf2x_mul(syndrome, c0, h0, r);
-
-    /* Decode: recover error (e0', e1') */
-    int decode_ok = bike_decode(e0_prime, e1_prime, syndrome, h0, h1, params);
+    /* Decode: s = c0 * h0, then recover (e0', e1'). Constant time; the
+     * result is secret and is combined below without branching. */
+    int decode_ok = bike_decode_ct(e0_prime, e1_prime, c0, h0, h1, params);
+    if (decode_ok < 0) {
+        /* Allocation failure only: not data-dependent. */
+        pqc_memzero(seed, sizeof(seed));
+        pqc_memzero(sigma, sizeof(sigma));
+        pqc_memzero(h0, r_words * sizeof(uint64_t));
+        pqc_memzero(h1, r_words * sizeof(uint64_t));
+        free(h0); free(h1); free(c0); free(syndrome);
+        free(e0_prime); free(e1_prime);
+        return -1;
+    }
 
     /* Verify: recompute c1' = H(e0' || e1') and compare with c1 */
     uint8_t c1_hash_prime[BIKE_SHARED_SECRET_BYTES];
     bike_hash_e(c1_hash_prime, e0_prime, e1_prime, params);
 
-    /*
-     * Evaluate both conditions unconditionally: branching on the
-     * comparison would leak through timing the same bit the implicit
-     * rejection below exists to hide.
-     */
     int cmp_eq = (pqc_memcmp_ct(c1_hash, c1_hash_prime,
                                 BIKE_SHARED_SECRET_BYTES) == 0);
-    int valid = (decode_ok == 0) && cmp_eq;
+    uint32_t valid = (uint32_t)decode_ok & (uint32_t)cmp_eq;
 
-    if (valid) {
-        /* ss = K(e0' || e1' || ct) */
-        bike_hash_k(ss, e0_prime, e1_prime, ct, params);
-    } else {
-        /* Implicit rejection: ss = K(sigma || ct) */
+    /*
+     * ss = K(e0' || e1' || ct) if valid, else K(sigma || ct) (implicit
+     * rejection). Both are computed and one is selected with a mask.
+     * Before 0.3.0 this was an if/else on `valid` -- computed with &&,
+     * which short-circuits -- so the time taken revealed whether a
+     * ciphertext decoded: the decoding-failure oracle that implicit
+     * rejection exists to remove, and a known key-recovery avenue
+     * against QC-MDPC codes.
+     */
+    {
+        uint8_t ss_reject[BIKE_SHARED_SECRET_BYTES];
         pqc_sha256_ctx ctx;
+        bike_hash_k(ss, e0_prime, e1_prime, ct, params);
         pqc_sha256_init(&ctx);
         pqc_sha256_update(&ctx, sigma, BIKE_SHARED_SECRET_BYTES);
         pqc_sha256_update(&ctx, ct, params->ct_bytes);
-        pqc_sha256_final(&ctx, ss);
+        pqc_sha256_final(&ctx, ss_reject);
+        pqc_ct_cmov(ss, ss_reject, BIKE_SHARED_SECRET_BYTES, valid ^ 1u);
+        pqc_memzero(ss_reject, sizeof ss_reject);
     }
 
     /* Cleanup */

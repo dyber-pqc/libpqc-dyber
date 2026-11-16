@@ -39,22 +39,17 @@ void bike_gf2x_mod(uint64_t *a, uint32_t r);
 /* Bit-flipping decoder (decode.c)                                      */
 /* ------------------------------------------------------------------ */
 
-/* Black-Gray-Flip decoder.
- * Returns 0 on success (error vector found), -1 on decoding failure.
- * e0, e1 are output error vector halves (each r bits).
- * syndrome is H * c^T.
- * h0, h1 are the secret key polynomials. */
-int bike_decode(uint64_t *e0, uint64_t *e1,
-                const uint64_t *syndrome,
-                const uint64_t *h0, const uint64_t *h1,
-                const bike_params_t *params);
-
-/* Compute syndrome s = e0*h0 + e1*h1 mod (x^r - 1) -- or equivalently
- * s = c0 + c1*h0 with the ciphertext interpretation. */
-void bike_compute_syndrome(uint64_t *syndrome,
-                           const uint64_t *c0, const uint64_t *c1,
-                           const uint64_t *h0,
-                           const bike_params_t *params);
+/* Black-Gray-Flip decoder (BIKE specification, Algorithm 3), constant
+ * time. Computes the syndrome s = c0 * h0 and decodes it with the secret
+ * key (h0, h1), writing the error vector halves to e0, e1 (r bits each).
+ *
+ * Returns 1 if the decoded error explains the syndrome, 0 if not, and -1
+ * only if memory allocation fails. The 0/1 result is secret: combine it
+ * with masks, never branch on it. */
+int bike_decode_ct(uint64_t *e0, uint64_t *e1,
+                   const uint64_t *c0,
+                   const uint64_t *h0, const uint64_t *h1,
+                   const bike_params_t *params);
 
 /* ------------------------------------------------------------------ */
 /* Sampling (sampling.c)                                                */

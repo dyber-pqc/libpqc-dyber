@@ -15,6 +15,21 @@
 #include "bike_params.h"
 #include "core/common/hash/sha3.h"
 
+/*
+ * Candidates are masked to the smallest power of two covering the range
+ * before the rejection test. Until 0.3.0 they were masked to 31 bits, so
+ * a candidate for a position below r = 12323 was accepted about 6 times
+ * in a million: one key generation squeezed SHAKE some 12 million times
+ * and took close to a second. With this mask at least half are accepted.
+ * The output distribution (uniform over the range) is unchanged.
+ */
+static uint32_t range_mask(uint32_t n)
+{
+    uint32_t m = 1;
+    while (m < n) m <<= 1;          /* n is public */
+    return m - 1;
+}
+
 /* ------------------------------------------------------------------ */
 /* Sample a sparse polynomial with exactly 'weight' bits set            */
 /* ------------------------------------------------------------------ */
@@ -41,7 +56,7 @@ void bike_sample_sparse(uint64_t *poly, uint32_t weight, uint32_t r,
                        ((uint32_t)buf[3] << 24);
 
         /* Rejection sampling: reject if pos >= r */
-        pos = pos & 0x7FFFFFFF; /* Mask to 31 bits */
+        pos = pos & range_mask(r);
         if (pos >= r) continue;
 
         /* Check for duplicates by testing the bit */
@@ -84,7 +99,7 @@ void bike_sample_error(uint64_t *e0, uint64_t *e1,
                        ((uint32_t)buf[3] << 24);
 
         /* Position in the 2r-bit vector */
-        val = val & 0x7FFFFFFF;
+        val = val & range_mask(2 * r);
         if (val >= 2 * r) continue;
 
         uint32_t pos = val % r;
