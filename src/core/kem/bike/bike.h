@@ -29,7 +29,8 @@ void bike_gf2x_add(uint64_t *o, const uint64_t *a, const uint64_t *b,
 void bike_gf2x_mul(uint64_t *o, const uint64_t *a, const uint64_t *b,
                     uint32_t r);
 
-/* o = a^{-1} mod (x^r - 1) in GF(2)[x], r prime */
+/* o = a^{-1} mod (x^r - 1), constant time; a must have odd weight.
+ * Returns 0, or -1 if memory allocation fails. */
 int  bike_gf2x_inv(uint64_t *o, const uint64_t *a, uint32_t r);
 
 /* Reduce mod (x^r - 1): clear bits >= r and fold */
@@ -55,14 +56,14 @@ int bike_decode_ct(uint64_t *e0, uint64_t *e1,
 /* Sampling (sampling.c)                                                */
 /* ------------------------------------------------------------------ */
 
-/* Sample a polynomial with exactly 'weight' bits set, uniform positions */
-void bike_sample_sparse(uint64_t *poly, uint32_t weight, uint32_t r,
-                        const uint8_t *seed, size_t seedlen);
+/* KeyGen: h0, h1 of weight w/2 from SHAKE256(seed), Algorithm 3 twice on
+ * one stream. Constant time. */
+void bike_sample_keys(uint64_t *h0, uint64_t *h1, const uint8_t seed[32],
+                      const bike_params_t *params);
 
-/* Sample a random error vector with weight t, split into (e0, e1) */
-void bike_sample_error(uint64_t *e0, uint64_t *e1,
-                       uint32_t t, uint32_t r,
-                       const uint8_t *seed, size_t seedlen);
+/* H(m): an error vector of weight t, split into (e0, e1). Constant time. */
+void bike_sample_error(uint64_t *e0, uint64_t *e1, const uint8_t m[32],
+                       const bike_params_t *params);
 
 /* ------------------------------------------------------------------ */
 /* Core KEM operations                                                  */

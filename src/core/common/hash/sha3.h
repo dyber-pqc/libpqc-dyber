@@ -21,10 +21,12 @@ extern "C" {
 
 /* ----- Output lengths (bytes) ------------------------------------ */
 #define PQC_SHA3_256_BYTES  32
+#define PQC_SHA3_384_BYTES  48
 #define PQC_SHA3_512_BYTES  64
 
 /* ----- Sponge rates (bytes) -------------------------------------- */
 #define PQC_SHA3_256_RATE   136   /* (1600 - 2*256) / 8 = 136 */
+#define PQC_SHA3_384_RATE   104   /* (1600 - 2*384) / 8 = 104 */
 #define PQC_SHA3_512_RATE    72   /* (1600 - 2*512) / 8 =  72 */
 #define PQC_SHAKE128_RATE   168   /* (1600 - 2*128) / 8 = 168 */
 #define PQC_SHAKE256_RATE   136   /* (1600 - 2*256) / 8 = 136 */
@@ -51,6 +53,10 @@ void pqc_sha3_256(uint8_t out[PQC_SHA3_256_BYTES],
  * @param inlen  Length of input data in bytes.
  */
 void pqc_sha3_512(uint8_t out[PQC_SHA3_512_BYTES],
+                   const uint8_t *in, size_t inlen);
+
+/* SHA3-384 (FIPS 202). Used by BIKE's L and K functions. */
+void pqc_sha3_384(uint8_t out[PQC_SHA3_384_BYTES],
                    const uint8_t *in, size_t inlen);
 
 /* ================================================================= */

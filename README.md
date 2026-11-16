@@ -171,9 +171,9 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 | HQC | HQC-128 | 1 | 2,249 B | 2,289 B | 4,481 B | 64 B |
 | HQC | HQC-192 | 3 | 4,522 B | 4,562 B | 9,026 B | 64 B |
 | HQC | HQC-256 | 5 | 7,245 B | 7,285 B | 14,469 B | 64 B |
-| BIKE | BIKE-L1 | 1 | 1,541 B | 3,749 B | 1,573 B | 32 B |
-| BIKE | BIKE-L3 | 3 | 3,083 B | 7,467 B | 3,115 B | 32 B |
-| BIKE | BIKE-L5 | 5 | 5,122 B | 12,371 B | 5,154 B | 32 B |
+| BIKE | BIKE-L1 | 1 | 1,541 B | 3,114 B | 1,573 B | 32 B |
+| BIKE | BIKE-L3 | 3 | 3,083 B | 6,198 B | 3,115 B | 32 B |
+| BIKE | BIKE-L5 | 5 | 5,122 B | 10,276 B | 5,154 B | 32 B |
 | Classic McEliece | 348864 | 1 | 261,120 B | 6,492 B | 128 B | 32 B |
 | Classic McEliece | 6688128 | 5 | 1,044,992 B | 13,932 B | 240 B | 32 B |
 | Classic McEliece | 8192128 | 5 | 1,357,824 B | 14,120 B | 240 B | 32 B |
@@ -799,13 +799,12 @@ this for the algorithms in [`tests/ct/ct_gate.txt`](tests/ct/ct_gate.txt):
 
 - ML-KEM, ML-DSA and SLH-DSA (all parameter sets)
 - the four hybrid schemes, including X25519, Ed25519 and P-256
-- FrodoKEM
+- BIKE and FrodoKEM
 - LMS-SHA256-H10 and XMSS-SHA2-10-256 (the larger LMS and XMSS sets
   share the signing code but take too long under Valgrind for every
   commit)
 
-**HQC is not constant time, nor are BIKE key generation and encapsulation**
-(BIKE decapsulation is), and the remaining families are not
+**HQC is not constant time**, and the remaining families are not
 yet functionally correct, so a timing result for them would mean nothing.
 See the Known issues in [CHANGELOG.md](CHANGELOG.md).
 
@@ -844,6 +843,8 @@ What CI checks today:
 
 - Interoperability of ML-DSA and SLH-DSA with OpenSSL 3.5, in both
   directions, for every parameter set
+- BIKE against all 300 official round 4 known-answer vectors
+  (`tests/kat/`)
 - Published test vectors for the hash layer (FIPS 180-4, FIPS 202,
   RFC 4231) and the classical primitives in the hybrids (RFC 7748,
   RFC 8032, RFC 6979, NIST CAVP)
@@ -856,8 +857,11 @@ What CI checks today:
   UndefinedBehaviorSanitizer (`tests/fuzz/`), 10 minutes per target per
   run with a corpus kept between runs
 
-Not yet in place: NIST known-answer vectors for the post-quantum
-algorithms themselves (`tests/kat/` is empty).
+Not yet in place: known-answer vectors for the other post-quantum
+algorithms, ML-KEM included. ML-DSA and SLH-DSA are checked against
+OpenSSL in CI instead; ML-KEM was compared byte for byte with
+@noble/post-quantum and OpenSSL once, during the 0.2.1 work (see
+CHANGELOG), but no such check runs in CI.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 

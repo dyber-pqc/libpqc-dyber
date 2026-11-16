@@ -3,52 +3,49 @@
  * Copyright (c) 2024-2026 Dyber, Inc.
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
- * BIKE - GF(2)[x] polynomial arithmetic modulo (x^r - 1).
+ * BIKE - arithmetic in R = GF(2)[x] / (x^r - 1), constant time.
  *
- * Provides addition (XOR), multiplication (schoolbook with reduction),
- * modular reduction, and inversion via the extended Euclidean algorithm.
+ * Polynomials are arrays of ceil(r/64) little-endian 64-bit words, bit i
+ * of the array being the coefficient of x^i, with bits >= r zero.
+ *
+ * Every function here runs in time independent of the coefficients of
+ * its operands, which are secret in key generation (h0, h1, h0^-1) and
+ * encapsulation (e1). Only r, which is public, steers control flow or
+ * addresses:
+ *
+ *   - Multiplication is Karatsuba over 64-bit words, with a carry-less
+ *     64x64 product computed by masked shifts (no table lookups).
+ *   - Inversion uses Fermat's little theorem with the Itoh-Tsujii
+ *     addition chain. Raising to 2^k is a fixed permutation of the bit
+ *     positions, determined by r and k alone.
+ *
+ * Until 0.3.0 multiplication skipped zero bits of one operand and
+ * reduced with a branch per bit, and inversion was a variable-time
+ * extended Euclid on the secret h0.
  */
 
 #include <string.h>
 #include <stdlib.h>
+
+#include "pqc/common.h"
 #include "bike.h"
 #include "bike_params.h"
 
 /* ------------------------------------------------------------------ */
-/* Utility: bit access                                                  */
-/* ------------------------------------------------------------------ */
-
-static inline int bit_get(const uint64_t *v, uint32_t i)
-{
-    return (int)((v[i / 64] >> (i % 64)) & 1);
-}
-
-static inline void bit_set(uint64_t *v, uint32_t i)
-{
-    v[i / 64] |= (uint64_t)1 << (i % 64);
-}
-
-static inline void bit_flip(uint64_t *v, uint32_t i)
-{
-    v[i / 64] ^= (uint64_t)1 << (i % 64);
-}
-
-/* ------------------------------------------------------------------ */
-/* Addition in GF(2): o = a XOR b                                       */
+/* Addition                                                             */
 /* ------------------------------------------------------------------ */
 
 void bike_gf2x_add(uint64_t *o, const uint64_t *a, const uint64_t *b,
                     uint32_t r_words)
 {
-    for (uint32_t i = 0; i < r_words; i++) {
+    for (uint32_t i = 0; i < r_words; i++)
         o[i] = a[i] ^ b[i];
-    }
 }
 
 /* ------------------------------------------------------------------ */
-/* Reduction mod (x^r - 1)                                              */
-/*                                                                      */
-/* Folds bits at positions >= r back to positions 0..r-1.               */
+/* Reduction of a polynomial of degree < 2r held in place: fold bits    */
+/* [r, 2r) onto [0, r). Callers that only hold r_words words can use    */
+/* bike_gf2x_mod, which folds the bits above r in the top word.         */
 /* ------------------------------------------------------------------ */
 
 void bike_gf2x_mod(uint64_t *a, uint32_t r)
@@ -56,219 +53,192 @@ void bike_gf2x_mod(uint64_t *a, uint32_t r)
     uint32_t r_words = (r + 63) / 64;
     uint32_t rem = r % 64;
 
-    if (rem == 0) {
-        /* r is a multiple of 64, nothing to fold within the last word */
+    if (rem == 0)
         return;
+    {
+        uint64_t overflow = a[r_words - 1] >> rem;
+        a[r_words - 1] &= ((uint64_t)1 << rem) - 1;
+        a[0] ^= overflow;
     }
-
-    /* Clear bits above r in the last word by folding them */
-    uint64_t overflow = a[r_words - 1] >> rem;
-    a[r_words - 1] &= ((uint64_t)1 << rem) - 1;
-    a[0] ^= overflow;
 }
 
-/* ------------------------------------------------------------------ */
-/* Multiplication: o = a * b mod (x^r - 1)                              */
-/*                                                                      */
-/* Schoolbook multiplication. For each set bit in b, XOR the shifted    */
-/* copy of a into result, then reduce mod (x^r - 1).                    */
-/* ------------------------------------------------------------------ */
+/* c (2n words) ^= nothing; c = a * b over GF(2)[x], a and b n words. */
 
+/* Carry-less 64 x 64 -> 128, by masked shifts. */
+static void clmul64(uint64_t *lo, uint64_t *hi, uint64_t a, uint64_t b)
+{
+    uint64_t l = 0, h = 0;
+    int i;
+    l = a & (0 - (b & 1));
+    for (i = 1; i < 64; i++) {
+        uint64_t m = 0 - ((b >> i) & 1);
+        l ^= (a << i) & m;
+        h ^= (a >> (64 - i)) & m;
+    }
+    *lo = l;
+    *hi = h;
+}
+
+#define KARATSUBA_CUTOFF 12
+
+/* c[0 .. na+nb) = a[0 .. na) * b[0 .. nb), schoolbook. */
+static void mul_school(uint64_t *c, const uint64_t *a, size_t na,
+                       const uint64_t *b, size_t nb)
+{
+    size_t i, j;
+    memset(c, 0, (na + nb) * sizeof(uint64_t));
+    for (i = 0; i < na; i++)
+        for (j = 0; j < nb; j++) {
+            uint64_t lo, hi;
+            clmul64(&lo, &hi, a[i], b[j]);
+            c[i + j] ^= lo;
+            c[i + j + 1] ^= hi;
+        }
+}
+
+/*
+ * c[0 .. 2n) = a * b, both n words. Karatsuba with an unbalanced split
+ * when n is odd: lo = n/2 words, hi = n - lo words.
+ */
+static int mul_kara(uint64_t *c, const uint64_t *a, const uint64_t *b,
+                    size_t n)
+{
+    size_t lo, hi, i;
+    uint64_t *t, *sa, *sb, *mid;
+
+    if (n <= KARATSUBA_CUTOFF) {
+        mul_school(c, a, n, b, n);
+        return 0;
+    }
+    lo = n / 2;
+    hi = n - lo;
+
+    /* one allocation: sa, sb (hi words each), mid (2*hi words) */
+    t = (uint64_t *)calloc(4 * hi, sizeof(uint64_t));
+    if (!t) return -1;
+    sa = t; sb = t + hi; mid = t + 2 * hi;
+
+    /* c_low = a0 * b0 (2*lo words), c_high = a1 * b1 (2*hi words) */
+    if (mul_kara(c, a, b, lo) || mul_kara(c + 2 * lo, a + lo, b + lo, hi)) {
+        free(t);
+        return -1;
+    }
+
+    /* mid = (a0 + a1)(b0 + b1), with a0, b0 zero-extended to hi words */
+    for (i = 0; i < hi; i++) {
+        sa[i] = a[lo + i] ^ (i < lo ? a[i] : 0);
+        sb[i] = b[lo + i] ^ (i < lo ? b[i] : 0);
+    }
+    if (mul_kara(mid, sa, sb, hi)) {
+        free(t);
+        return -1;
+    }
+    /* mid -= a0b0 + a1b1 */
+    for (i = 0; i < 2 * lo; i++)
+        mid[i] ^= c[i];
+    for (i = 0; i < 2 * hi; i++)
+        mid[i] ^= c[2 * lo + i];
+    /* c += mid * x^(64*lo) */
+    for (i = 0; i < 2 * hi; i++)
+        c[lo + i] ^= mid[i];
+
+    free(t);
+    return 0;
+}
+
+/*
+ * o = a * b mod (x^r - 1). Constant time in a and b.
+ * On allocation failure o is set to zero.
+ */
 void bike_gf2x_mul(uint64_t *o, const uint64_t *a, const uint64_t *b,
                     uint32_t r)
 {
     uint32_t r_words = (r + 63) / 64;
-    uint32_t result_words = r_words * 2 + 1;
-    uint64_t *result = (uint64_t *)calloc(result_words, sizeof(uint64_t));
+    uint32_t q = r / 64, sh = r % 64, j;
+    uint64_t *prod = (uint64_t *)calloc(2 * r_words + 1, sizeof(uint64_t));
 
-    if (!result) {
+    if (!prod || mul_kara(prod, a, b, r_words)) {
+        free(prod);
         memset(o, 0, r_words * sizeof(uint64_t));
         return;
     }
 
-    /*
-     * Constant time in both operands: every bit of b is processed, with
-     * a mask rather than a skip. Both operands are secret somewhere --
-     * e1 in encapsulation, h0^-1 in key generation -- and skipping zero
-     * bits of b made the running time, and the sequence of memory
-     * writes, depend on them.
-     */
-    for (uint32_t i = 0; i < r; i++) {
-        uint64_t m = 0 - (uint64_t)bit_get(b, i);
-        uint32_t word_off = i / 64;
-        uint32_t bit_off  = i % 64;
-
-        if (bit_off == 0) {                       /* i is public */
-            for (uint32_t j = 0; j < r_words; j++) {
-                result[word_off + j] ^= a[j] & m;
-            }
-        } else {
-            for (uint32_t j = 0; j < r_words; j++) {
-                result[word_off + j]     ^= (a[j] << bit_off) & m;
-                result[word_off + j + 1] ^= (a[j] >> (64 - bit_off)) & m;
-            }
-        }
+    /* Fold bits [r, 2r) onto [0, r): word shifts by the public r. Writes
+     * go to words 0..q, and every read of word q happens at j = 0,
+     * before it is written. */
+    for (j = 0; j < r_words; j++) {
+        uint64_t lo = prod[q + j];
+        uint64_t hi = prod[q + j + 1];
+        prod[j] ^= sh ? (lo >> sh) | (hi << (64 - sh)) : lo;
     }
+    memcpy(o, prod, r_words * sizeof(uint64_t));
+    if (sh)
+        o[r_words - 1] &= ((uint64_t)1 << sh) - 1;
 
-    /*
-     * Reduce mod x^r - 1: fold bits [r, 2r) onto [0, r) with word shifts
-     * (r is public). The old loop tested each high bit of the product and
-     * flipped it conditionally. Writes go to words 0..q and every read of
-     * word q happens at j = 0, before it is written.
-     */
-    {
-        uint32_t q = r / 64, sh = r % 64;
-        for (uint32_t j = 0; j < r_words; j++) {
-            uint64_t lo = result[q + j];
-            uint64_t hi = result[q + j + 1];
-            uint64_t v = sh ? (lo >> sh) | (hi << (64 - sh)) : lo;
-            result[j] ^= v;
-        }
-    }
-
-    memcpy(o, result, r_words * sizeof(uint64_t));
-
-    /* Clear trailing bits */
-    uint32_t rem = r % 64;
-    if (rem) {
-        o[r_words - 1] &= ((uint64_t)1 << rem) - 1;
-    }
-
-    free(result);
+    pqc_memzero(prod, (2 * r_words + 1) * sizeof(uint64_t));
+    free(prod);
 }
 
 /* ------------------------------------------------------------------ */
-/* Inversion in GF(2)[x] / (x^r - 1) via extended GCD                  */
-/*                                                                      */
-/* Since r is prime and a(x) is nonzero, gcd(a(x), x^r-1) = 1, so     */
-/* the inverse always exists.                                           */
-/*                                                                      */
-/* Uses a binary GCD variant adapted for polynomials over GF(2).        */
+/* Inversion                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Find the degree of polynomial v */
-static int poly_degree(const uint64_t *v, uint32_t max_words)
+/* o = a^(2^k): coefficient i moves to i * 2^k mod r. o must not alias a. */
+static void sqr_k(uint64_t *o, const uint64_t *a, uint32_t k, uint32_t r)
 {
-    for (int w = (int)max_words - 1; w >= 0; w--) {
-        if (v[w] != 0) {
-            /* Find highest set bit */
-            uint64_t val = v[w];
-            int bit = 63;
-            while (bit >= 0 && !((val >> bit) & 1)) bit--;
-            return w * 64 + bit;
-        }
+    uint32_t r_words = (r + 63) / 64, i, j = 0, step = 1;
+
+    for (i = 0; i < k; i++)                     /* step = 2^k mod r */
+        step = (uint32_t)(((uint64_t)step * 2) % r);
+    memset(o, 0, r_words * sizeof(uint64_t));
+    for (i = 0; i < r; i++) {
+        uint64_t bit = (a[i / 64] >> (i % 64)) & 1;   /* i, j public */
+        o[j / 64] |= bit << (j % 64);
+        j += step;
+        if (j >= r) j -= r;
     }
-    return -1;
 }
 
+/*
+ * o = a^-1 in R. r is prime and 2 is primitive modulo r, so
+ * R = GF(2) x GF(2^(r-1)) and every a of odd weight not divisible by
+ * (x^r - 1)/(x - 1) has the inverse a^(2^(r-1) - 2). BIKE's h0 has odd
+ * weight w/2 and qualifies.
+ *
+ * With f(k) = a^(2^k - 1): f(2k) = f(k)^(2^k) * f(k) and
+ * f(k + 1) = f(k)^2 * a, so f(r - 2) follows from the bits of r - 2, and
+ * a^-1 = f(r - 2)^2. Returns 0, or -1 if memory allocation fails.
+ */
 int bike_gf2x_inv(uint64_t *o, const uint64_t *a, uint32_t r)
 {
-    /*
-     * Extended Euclidean algorithm for GF(2)[x].
-     * Computes o such that a * o = 1 mod (x^r - 1).
-     */
     uint32_t r_words = (r + 63) / 64;
-    /* Bezout coefficients can have degree up to 2r during intermediate steps,
-     * so allocate enough space for shifted products g2 * x^shift. */
-    uint32_t alloc_words = r_words * 2 + 4;
+    uint32_t n = r - 2, k = 1;
+    int bit;
+    uint64_t *f = (uint64_t *)calloc(r_words, sizeof(uint64_t));
+    uint64_t *t = (uint64_t *)calloc(r_words, sizeof(uint64_t));
 
-    uint64_t *u  = (uint64_t *)calloc(alloc_words, sizeof(uint64_t));
-    uint64_t *v  = (uint64_t *)calloc(alloc_words, sizeof(uint64_t));
-    uint64_t *g1 = (uint64_t *)calloc(alloc_words, sizeof(uint64_t));
-    uint64_t *g2 = (uint64_t *)calloc(alloc_words, sizeof(uint64_t));
-
-    if (!u || !v || !g1 || !g2) {
-        free(u); free(v); free(g1); free(g2);
+    if (!f || !t) {
+        free(f); free(t);
         return -1;
     }
 
-    /* u = x^r - 1 = x^r + 1 (same in GF(2)) */
-    memset(u, 0, alloc_words * sizeof(uint64_t));
-    bit_set(u, r);
-    bit_set(u, 0);  /* x^r + 1 */
-
-    /* v = a */
-    memcpy(v, a, r_words * sizeof(uint64_t));
-
-    /* g1 = 0, g2 = 1 */
-    memset(g1, 0, alloc_words * sizeof(uint64_t));
-    memset(g2, 0, alloc_words * sizeof(uint64_t));
-    g2[0] = 1;
-
-    int deg_u = poly_degree(u, alloc_words);
-    int deg_v = poly_degree(v, alloc_words);
-
-    while (deg_v >= 0) {
-        /* While deg(u) >= deg(v) */
-        int shift = deg_u - deg_v;
-        if (shift < 0) {
-            /* Swap u <-> v, g1 <-> g2 */
-            uint64_t *tmp;
-            int tmp_deg;
-            tmp = u; u = v; v = tmp;
-            tmp = g1; g1 = g2; g2 = tmp;
-            tmp_deg = deg_u; deg_u = deg_v; deg_v = tmp_deg;
-            shift = -shift;
-        }
-
-        /* u = u + v * x^shift */
-        if (shift < (int)(alloc_words * 64)) {
-            uint32_t word_off = (uint32_t)shift / 64;
-            uint32_t bit_off  = (uint32_t)shift % 64;
-            uint32_t max_j = alloc_words - word_off;
-
-            if (bit_off == 0) {
-                for (uint32_t j = 0; j < max_j && (word_off + j) < alloc_words; j++) {
-                    u[word_off + j] ^= v[j];
-                }
-                for (uint32_t j = 0; j < max_j && (word_off + j) < alloc_words; j++) {
-                    g1[word_off + j] ^= g2[j];
-                }
-            } else {
-                for (uint32_t j = 0; j < max_j && (word_off + j) < alloc_words; j++) {
-                    u[word_off + j] ^= v[j] << bit_off;
-                    if (word_off + j + 1 < alloc_words) {
-                        u[word_off + j + 1] ^= v[j] >> (64 - bit_off);
-                    }
-                }
-                for (uint32_t j = 0; j < max_j && (word_off + j) < alloc_words; j++) {
-                    g1[word_off + j] ^= g2[j] << bit_off;
-                    if (word_off + j + 1 < alloc_words) {
-                        g1[word_off + j + 1] ^= g2[j] >> (64 - bit_off);
-                    }
-                }
-            }
-        }
-
-        deg_u = poly_degree(u, alloc_words);
-
-        /* Swap if needed to maintain deg_u >= deg_v */
-        if (deg_u < deg_v) {
-            uint64_t *tmp;
-            int tmp_deg;
-            tmp = u; u = v; v = tmp;
-            tmp = g1; g1 = g2; g2 = tmp;
-            tmp_deg = deg_u; deg_u = deg_v; deg_v = tmp_deg;
-        }
-        deg_v = poly_degree(v, alloc_words);
-    }
-
-    /* u should now be 1 (or a constant), g1 is the inverse */
-    /* Reduce g1 mod (x^r - 1) */
-    for (uint32_t i = r; i < alloc_words * 64; i++) {
-        if (bit_get(g1, i)) {
-            uint32_t target = (i - r) % r;
-            bit_flip(g1, target);
-            bit_flip(g1, i);
+    memcpy(f, a, r_words * sizeof(uint64_t));          /* f(1) = a */
+    for (bit = 30; bit >= 0 && !((n >> bit) & 1); bit--)
+        ;                                               /* n is public */
+    for (bit--; bit >= 0; bit--) {
+        sqr_k(t, f, k, r);
+        bike_gf2x_mul(f, t, f, r);                      /* f(2k) */
+        k *= 2;
+        if ((n >> bit) & 1) {
+            sqr_k(t, f, 1, r);
+            bike_gf2x_mul(f, t, a, r);                  /* f(k + 1) */
+            k += 1;
         }
     }
+    sqr_k(o, f, 1, r);                                  /* f(r-2)^2 */
 
-    memcpy(o, g1, r_words * sizeof(uint64_t));
-    uint32_t rem = r % 64;
-    if (rem) {
-        o[r_words - 1] &= ((uint64_t)1 << rem) - 1;
-    }
-
-    free(u); free(v); free(g1); free(g2);
+    pqc_memzero(f, r_words * sizeof(uint64_t));
+    pqc_memzero(t, r_words * sizeof(uint64_t));
+    free(f); free(t);
     return 0;
 }
