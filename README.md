@@ -997,18 +997,41 @@ Both implement post-quantum algorithms, but libpqc-dyber:
 
 | Use Case | Recommended KEM | Recommended Signature |
 |----------|----------------|----------------------|
-| **General purpose** | ML-KEM-768 | ML-DSA-65 |
-| **Maximum security** | ML-KEM-1024 | ML-DSA-87 |
-| **Smallest signatures** | — | FN-DSA-512 |
-| **Smallest keys** | ML-KEM-512 | MAYO-1 or SNOVA-24-5-4 |
-| **Conservative (hash-based)** | — | SLH-DSA-SHA2-128s |
-| **FIPS compliance** | ML-KEM-768 | ML-DSA-65 |
+| **General purpose** | ML-KEM-768 | ML-DSA-65 ¹ |
+| **Maximum security** | ML-KEM-1024 | ML-DSA-87 ¹ |
+| **Smallest keys** | ML-KEM-512 | — |
+| **Conservative (hash-based)** | — | SLH-DSA-SHA2-128s ² |
 | **Hybrid (belt-and-suspenders)** | ML-KEM-768+X25519 | ML-DSA-65+Ed25519 |
-| **Long-term archival signing** | — | LMS-SHA256-H20 (stateful) |
+| **Long-term archival signing** | — | LMS-SHA256-H10 (stateful) ³ |
+
+¹ ML-DSA currently signs the message directly rather than applying the
+FIPS 204 §5.2 domain-separation prefix (`0x00 || len(ctx) || ctx || M`). The
+arithmetic is correct, but signatures are not interoperable with conformant
+implementations and there is no context parameter. Fixed in 0.3.0, which
+changes signature bytes.
+
+² SLH-DSA has two FIPS 205 conformance defects (the FORS keypair address is
+cleared before use, and `H_msg` emits one byte too few in 8 of 12 parameter
+sets). It signs and verifies, but with reduced multi-target margin and
+without interoperability. Fixed in 0.3.0.
+
+³ H20 and H25 cannot generate keys: signing rebuilds the whole 2^h-leaf tree,
+and there is no room in the secret key for cached traversal state.
+
+FN-DSA, MAYO and SNOVA were previously listed here and have been removed —
+FN-DSA key generation fails and MAYO and SNOVA signatures do not verify.
 
 ### Is this production-ready?
 
-ML-KEM (FIPS 203) and ML-DSA (FIPS 204) have complete, specification-faithful implementations with KAT validation. The remaining algorithms have their framework (parameter sizes, API integration) in place and are being filled in. We recommend using ML-KEM and ML-DSA for production workloads now.
+ML-KEM (FIPS 203) is: it interoperates in both directions with an
+independent ACVP-validated implementation, including the implicit-rejection
+path. ML-DSA's arithmetic is correct and interoperates once the §5.2 prefix
+is applied (see ¹). The hash layer and the classical hybrid primitives are
+checked against published vectors. Known-answer vectors for the
+post-quantum algorithms are not yet in the repository.
+
+The remaining algorithms are incomplete; see "Known issues" in CHANGELOG.md
+for the specific list.
 
 ### How do I report a security vulnerability?
 

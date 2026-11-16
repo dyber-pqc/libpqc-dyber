@@ -24,12 +24,41 @@ We will acknowledge receipt within 48 hours and provide a detailed response with
 
 ## Security Considerations
 
-libpqc-dyber implements post-quantum cryptographic algorithms. While we strive for correctness and security:
+libpqc-dyber implements post-quantum cryptographic algorithms. Not every
+algorithm in this repository is finished — see "Implementation status" below
+before depending on one.
 
-- All implementations target constant-time execution for secret-dependent operations
-- Memory containing secret key material is zeroized on deallocation
-- We validate against NIST Known Answer Test (KAT) vectors
-- We run constant-time verification tools (valgrind/ctgrind) in CI
+What CI verifies:
+
+- Memory safety, under AddressSanitizer, UndefinedBehaviorSanitizer and
+  Valgrind memcheck, across the test suite
+- Published known-answer vectors for the hash layer (FIPS 180-4, FIPS 202,
+  RFC 4231) and for the classical primitives used by the hybrid schemes
+  (RFC 7748, RFC 8032, RFC 6979, NIST CAVP)
+- Round-trip tests, and a regression suite asserting the specific invariant
+  behind each previously reported defect
+- Zero-warning builds, reproducible builds, and static analysis
+
+Design intent that CI does **not** yet verify:
+
+- Constant-time execution for secret-dependent operations. The
+  implementations target it, but the Valgrind jobs run plain memcheck, which
+  detects memory errors and produces no timing signal. Verifying it needs the
+  ctgrind approach — marking secret buffers undefined so that branches and
+  indices derived from them are reported — which is not yet wired up.
+- Known-answer vectors for the post-quantum algorithms themselves. None are
+  in the repository yet.
+
+Secret key material is zeroized on deallocation.
+
+## Implementation status
+
+ML-KEM (FIPS 203), ML-DSA (FIPS 204), the hash layer and, as of 0.2.1, the
+classical halves of the hybrid schemes are tested against independent
+references. Several other algorithm families are incomplete. The "Known
+issues" section of CHANGELOG.md is the maintained list; it is kept specific
+on purpose, because a general statement that some algorithms are "being
+filled in" is too easy to misread.
 
 ## Scope
 
