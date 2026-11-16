@@ -1056,8 +1056,8 @@ see CHANGELOG.md.
 
 ² SLH-DSA had several FIPS 205 conformance defects before 0.3.0, including
 the FORS key-pair address being cleared before use, which reduced its
-multi-target margin. All twelve parameter sets now interoperate with
-OpenSSL.
+multi-target margin. All twelve parameter sets now pass NIST's ACVP
+vectors and interoperate with OpenSSL.
 
 ³ H20 and H25 cannot generate keys: signing rebuilds the whole 2^h-leaf tree,
 and there is no room in the secret key for cached traversal state.
@@ -1067,14 +1067,14 @@ FN-DSA key generation fails and MAYO and SNOVA signatures do not verify.
 
 ### Is this production-ready?
 
-ML-KEM (FIPS 203) interoperates in both directions with an independent
-ACVP-validated implementation, including the implicit-rejection path. As of
-0.3.0, ML-DSA (FIPS 204) and SLH-DSA (FIPS 205) interoperate in both
-directions with OpenSSL 3.5 for every parameter set, with and without a
-context string; a CI job runs this check. The hash layer and the
-classical hybrid primitives are checked against published vectors.
-Known-answer vectors for the post-quantum algorithms are not yet in the
-repository, so these are interoperability results, not ACVP validation.
+As of 0.3.0, CI checks ML-KEM (FIPS 203), ML-DSA (FIPS 204) and SLH-DSA
+(FIPS 205) against NIST's ACVP test vectors, and ML-DSA and SLH-DSA
+against OpenSSL 3.5 in both directions; BIKE reproduces its official
+round 4 known-answer tests. The hash layer and the classical hybrid
+primitives are checked against published vectors, and these algorithms
+are checked for constant-time execution (see Security). Passing NIST's
+test vectors is not the same as a CAVP or CMVP certificate: the library
+has not been through formal validation.
 
 The remaining algorithms are incomplete; see "Known issues" in CHANGELOG.md
 for the specific list.
