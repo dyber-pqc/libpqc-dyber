@@ -52,16 +52,17 @@ What CI verifies:
 
 Design intent that CI does **not** yet verify:
 
-- Constant-time execution of HQC and BIKE, which the ctgrind run shows
-  they do not have, and of the algorithm families that are not yet
-  functionally correct.
+- Constant-time execution of HQC, and of BIKE key generation and
+  encapsulation, which the ctgrind run shows they do not have (BIKE
+  decapsulation is clean), and of the algorithm families that are not
+  yet functionally correct.
 - Known-answer vectors for the post-quantum algorithms themselves. None are
   in the repository yet.
 - Deep fuzzing. CI fuzzes signature verification and KEM decapsulation /
   encapsulation for 10 minutes per target per run (`tests/fuzz/`); that
-  is a smoke test, not continuous fuzzing. BIKE decapsulation is not
-  fuzzed because it is too slow (CHANGELOG known issues), and a few
-  algorithms are fuzzed with attacker-chosen keys only.
+  is a smoke test, not continuous fuzzing. A few algorithms are fuzzed
+  with attacker-chosen keys only, because setting up valid keys for them
+  is too slow under AddressSanitizer.
 
 Secret key material is zeroized on deallocation.
 

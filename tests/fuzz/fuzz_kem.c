@@ -95,12 +95,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     data += 2; size -= 2;
     a = &algs[idx];
 
-    /* BIKE decapsulation of a malformed ciphertext takes 20 s to minutes
-     * even without sanitizers (CHANGELOG known issues), so every BIKE
-     * decapsulation input would be a timeout. Its encapsulation is still
-     * fuzzed. */
-    if (mode != 2 && strncmp(a->name, "BIKE-", 5) == 0)
-        mode = 2;
     if (mode != 2 && !have_keys(a, idx))
         mode = 2;
 

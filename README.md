@@ -804,7 +804,8 @@ this for the algorithms in [`tests/ct/ct_gate.txt`](tests/ct/ct_gate.txt):
   share the signing code but take too long under Valgrind for every
   commit)
 
-**HQC and BIKE are not constant time**, and the remaining families are not
+**HQC is not constant time, nor are BIKE key generation and encapsulation**
+(BIKE decapsulation is), and the remaining families are not
 yet functionally correct, so a timing result for them would mean nothing.
 See the Known issues in [CHANGELOG.md](CHANGELOG.md).
 

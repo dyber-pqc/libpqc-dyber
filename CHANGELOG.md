@@ -109,6 +109,35 @@ Found by the new fuzz targets (see Added):
   of at most 2^16 the result is unchanged. Both also skipped zero
   coefficients of the first operand, often a secret; that branch is gone.
   NTRU still does not round-trip (Known issues).
+- **BIKE decapsulation could be made to run for minutes, and leaked
+  through its timing.** The decoder was an ad-hoc bit-flipping loop of up
+  to 100 iterations with approximate thresholds, quadratic in the block
+  length r per iteration, that stopped as soon as the syndrome cleared.
+  In a release build (gcc -O2, x86-64) it took about 1, 3 and 5 s for a
+  valid ciphertext at L1, L3 and L5, and 22, 60 and 148 s for a random
+  one, so anyone able to send a ciphertext could occupy a core for
+  minutes. Its running time also depended on the secret key and on
+  whether decoding succeeded, and it read the syndrome at addresses
+  derived from the secret key.
+
+  It is replaced by the Black-Gray-Flip decoder of the BIKE
+  specification (Algorithm 3: five iterations, tau = 3, the specified
+  threshold function, and the two masked iterations), implemented in
+  constant time: the secret key positions are extracted by a full scan,
+  counters for every position come from rotating the whole syndrome by
+  each secret position with a masked barrel shift into bit-sliced
+  counters, and the iteration count is fixed. Decapsulation now takes
+  3.4, 9.7 and 24 ms at L1, L3 and L5, the same for valid, modified and
+  random ciphertexts. 1,000 round trips per level decoded correctly and
+  every modified ciphertext was rejected. Shared secrets for valid
+  ciphertexts, and keys, are unchanged.
+
+  Decapsulation also chose between the real and the rejection secret
+  with an `if` on a validity bit computed with `&&` -- the same oracle as
+  FrodoKEM above -- and `bike_gf2x_mul` skipped zero bits of its second
+  operand, the secret h0 when computing the syndrome, and reduced with a
+  branch per bit. Both are now constant time. Under ctgrind,
+  decapsulation went from 30 findings to none.
 
 ### Added
 
@@ -155,8 +184,7 @@ Found by the new fuzz targets (see Added):
   sanitizer report or timeout. Algorithms whose key generation is too
   slow under ASan to set up per process (Classic McEliece, the larger
   LMS and XMSS trees, the SLH-DSA/SPHINCS+ SHAKE "s" sets) and FN-DSA
-  are fuzzed with attacker-chosen keys only; BIKE decapsulation is not
-  fuzzed (Known issues).
+  are fuzzed with attacker-chosen keys only.
 
 - `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
   context string of up to 255 bytes. `pqc_sig_sign()` and
@@ -197,24 +225,32 @@ Found by the new fuzz targets (see Added):
   an error, so a memory error in FN-DSA key generation still fails CI.
   When key generation starts working the test fails, as a prompt to make
   it an ordinary one.
+- BIKE samples key and error positions with candidates masked to the
+  smallest power of two covering the range, instead of 31 bits, of which
+  about 6 in a million were accepted. Key generation went from 0.6-0.9 s
+  to 8, 28 and 82 ms at L1, L3 and L5, and encapsulation from 0.3-0.4 s
+  to 1.5, 5 and 15 ms. The distribution is unchanged.
 
 ### Known issues
 
-- **BIKE decapsulation is slow enough to be a denial-of-service vector.**
-  The bit-flipping decoder is quadratic in the block length r at every
-  iteration, and a malformed ciphertext runs every iteration with many
-  flips. In a release build (gcc -O2, x86-64) one decapsulation takes
-  about 1, 3 and 5 seconds for a valid ciphertext at L1, L3 and L5, and
-  22, 60 and 148 seconds for a random one. Anyone who can send a
-  ciphertext can occupy a core for minutes. Found while fuzzing.
+- **BIKE is not the specified KEM.** It decodes with the specified
+  decoder (above), but encapsulation samples the error vector directly,
+  sends H(e) as the second ciphertext component and derives the key from
+  e and the ciphertext. The BIKE specification samples m, derives e from
+  it, sends m XOR L(e) and derives the key from m and the ciphertext. It
+  does not interoperate with BIKE, and there are no known-answer tests.
 
 From the ctgrind run over every algorithm:
 
-- **HQC and BIKE are not constant time.** HQC has 8 findings in each
-  parameter set, BIKE 30: fixed-weight sampling that branches and indexes
-  on secret positions, sparse polynomial multiplication indexed by secret
-  positions, table-based GF(2^m) arithmetic and branching decoders. These
-  are structural, not annotations, and are left for a dedicated change.
+- **HQC is not constant time** (8 findings in each parameter set):
+  fixed-weight sampling that branches and indexes on secret positions,
+  sparse polynomial multiplication indexed by secret positions,
+  table-based GF(2^m) arithmetic and a branching decoder. This is
+  structural and left for a dedicated change.
+- **BIKE key generation and encapsulation are not constant time**
+  (decapsulation is; see Security). Polynomial inversion in key
+  generation is a variable-time extended Euclid on the secret h0, and
+  sampling key and error positions branches on and indexes by them.
 - CROSS, Classic McEliece, MAYO, NTRU, NTRU Prime, SNOVA and UOV do not
   round-trip under the check (decapsulation disagrees with encapsulation,
   or a signature does not verify), and FN-DSA key generation fails
