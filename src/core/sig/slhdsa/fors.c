@@ -65,7 +65,8 @@ static void fors_gen_leaf(uint8_t *leaf,
 
     memset(prf_addr, 0, 32);
     slhdsa_copy_keypair_addr(prf_addr, addr);
-    slhdsa_set_type(prf_addr, SLHDSA_ADDR_TYPE_FORSPRF);
+    /* FIPS 205 Alg. 14: setTypeAndClear(FORS_PRF), then restore keypair. */
+    slhdsa_set_type_keep_keypair(prf_addr, SLHDSA_ADDR_TYPE_FORSPRF);
     slhdsa_set_tree_index(prf_addr, addr_idx);
     slhdsa_set_tree_height(prf_addr, 0);
 
@@ -94,7 +95,7 @@ static void fors_tree_node(uint8_t *out,
         fors_gen_leaf(sk, sk_seed, pub_seed, leaf_abs, addr, p);
 
         /* Hash the leaf: F(PK.seed, ADRS, SK) */
-        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_FORSTREE);
+        slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_FORSTREE);
         slhdsa_set_tree_height(addr, 0);
         slhdsa_set_tree_index(addr, leaf_abs);
         slhdsa_thash(out, sk, 1, pub_seed, addr, p);
@@ -113,7 +114,7 @@ static void fors_tree_node(uint8_t *out,
         memcpy(pair + n, right, n);
 
         uint32_t abs_idx = tree_idx * (1u << (p->a - height)) + node_idx;
-        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_FORSTREE);
+        slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_FORSTREE);
         slhdsa_set_tree_height(addr, height);
         slhdsa_set_tree_index(addr, abs_idx);
         slhdsa_thash(out, pair, 2, pub_seed, addr, p);
@@ -197,7 +198,7 @@ void slhdsa_fors_pk_from_sig(uint8_t *pk,
         uint32_t leaf_abs = i * (1u << a) + idx;
 
         /* Hash the secret value to get the leaf */
-        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_FORSTREE);
+        slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_FORSTREE);
         slhdsa_set_tree_height(addr, 0);
         slhdsa_set_tree_index(addr, leaf_abs);
         slhdsa_thash(node, sig_ptr, 1, pub_seed, addr, p);
@@ -228,7 +229,13 @@ void slhdsa_fors_pk_from_sig(uint8_t *pk,
         memcpy(roots + i * n, node, n);
     }
 
-    /* Compress all k roots into the FORS public key */
-    slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_FORSPK);
-    slhdsa_thash(pk, roots, k, pub_seed, addr, p);
+    /* Compress all k roots into the FORS public key.
+     * FIPS 205 Alg. 17: on a copy of ADRS, setTypeAndClear(FORS_ROOTS) and
+     * restore the keypair address. */
+    {
+        uint8_t pk_addr[32];
+        memcpy(pk_addr, addr, 32);
+        slhdsa_set_type_keep_keypair(pk_addr, SLHDSA_ADDR_TYPE_FORSPK);
+        slhdsa_thash(pk, roots, k, pub_seed, pk_addr, p);
+    }
 }

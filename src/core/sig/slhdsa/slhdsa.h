@@ -26,6 +26,8 @@ void slhdsa_set_layer_addr(uint8_t addr[32], uint32_t layer);
 void slhdsa_set_tree_addr(uint8_t addr[32], uint64_t tree);
 void slhdsa_set_type(uint8_t addr[32], uint32_t type);
 void slhdsa_set_keypair_addr(uint8_t addr[32], uint32_t keypair);
+uint32_t slhdsa_get_keypair_addr(const uint8_t addr[32]);
+void slhdsa_set_type_keep_keypair(uint8_t addr[32], uint32_t type);
 void slhdsa_set_chain_addr(uint8_t addr[32], uint32_t chain);
 void slhdsa_set_hash_addr(uint8_t addr[32], uint32_t hash);
 void slhdsa_set_tree_height(uint8_t addr[32], uint32_t height);

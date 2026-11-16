@@ -243,8 +243,7 @@ void slhdsa_hash_msg_sha2(uint8_t *out,
      * Total bits = k*a + h
      * We compute enough bytes to cover this.
      */
-    size_t digest_bits = (size_t)(p->k) * p->a + p->h;
-    size_t digest_bytes = (digest_bits + 7) / 8;
+    size_t digest_bytes = slhdsa_hmsg_bytes(p);  /* FIPS 205 m; see slhdsa_params.h */
 
     if (n <= 16) {
         pqc_sha256_ctx ctx;
