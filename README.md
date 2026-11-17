@@ -507,7 +507,7 @@ print("KEMs:", pqc.kem_algorithms())
 print("Signatures:", pqc.sig_algorithms())
 ```
 
-Install: `pip install pqc-dyber`
+Install from this repository: `pip install ./bindings/python` (not published on PyPI)
 
 ### Rust Example
 
@@ -601,7 +601,7 @@ public class Example {
 }
 ```
 
-Maven: `com.dyber:pqc:0.1.0`
+Build from `bindings/java` (not published on Maven Central)
 
 ### JavaScript / TypeScript Example
 
@@ -623,7 +623,7 @@ const valid = sig.verify(Buffer.from('Hello, PQC!'), signature, keys.publicKey);
 console.log('Signature valid:', valid);
 ```
 
-Install: `npm install @dyber/pqc`
+Install from this repository: `npm install ./bindings/javascript` (not published on npm)
 
 ### C# Example
 
@@ -645,7 +645,7 @@ var valid = sig.Verify(Encoding.UTF8.GetBytes("Hello, PQC!"), signature, sigPk);
 Console.WriteLine($"Signature valid: {valid}");
 ```
 
-NuGet: `dotnet add package PqcDyber`
+Reference `bindings/csharp/PqcDyber.csproj` from your project (not published on NuGet)
 
 ### CLI Example
 
@@ -674,26 +674,32 @@ pqc-cli verify ML-DSA-65 --pk signer.pk --msg document.pdf --sig document.sig
 
 ## All Language Bindings
 
-| Language | Package | Install | Mechanism |
+None of the bindings is published to a package registry. Build them from
+`bindings/<language>` against an installed libpqc-dyber. The package names
+below are not registered on PyPI, crates.io, npm, NuGet or Maven Central;
+a package that appears there under one of them was not published by this
+project.
+
+| Language | Package name | Install | Mechanism |
 |----------|---------|---------|-----------|
 | **C** | Core library | `cmake --install build` | Native |
 | **C++** | Header-only | `#include <pqc/pqc.hpp>` | Direct C++ wrapper (RAII) |
-| **Python** | `pqc-dyber` | `pip install pqc-dyber` | ctypes/CFFI |
-| **Rust** | `pqc-dyber` | `cargo add pqc-dyber` | bindgen + safe wrapper |
+| **Python** | `pqc-dyber` | `pip install ./bindings/python` | ctypes/CFFI |
+| **Rust** | `pqc-dyber` | `cargo add --path bindings/rust` | bindgen + safe wrapper |
 | **Go** | `go module` | `go get github.com/dyber-pqc/libpqc-dyber/bindings/go` | CGO |
-| **Java** | `com.dyber:pqc` | Maven Central | JNI |
-| **Kotlin** | `com.dyber:pqc-kotlin` | Maven Central | JNI (wraps Java) |
-| **Scala** | `com.dyber:pqc-scala` | Maven Central | JNI (wraps Java) |
-| **C#** | `PqcDyber` | `dotnet add package PqcDyber` | P/Invoke |
-| **JavaScript** | `@dyber/pqc` | `npm install @dyber/pqc` | N-API native addon |
-| **TypeScript** | `@dyber/pqc` | `npm install @dyber/pqc` | Types over JS binding |
-| **PHP** | `dyber/pqc` | `composer require dyber/pqc` | PHP FFI |
-| **Ruby** | `pqc-dyber` | `gem install pqc-dyber` | Ruby FFI |
-| **Swift** | `PQCDyber` | Swift Package Manager | C interop |
-| **Dart** | `pqc_dyber` | `dart pub add pqc_dyber` | dart:ffi |
-| **Perl** | `Crypt::PQC::Dyber` | CPAN | XS |
-| **R** | `pqcDyber` | CRAN | .Call interface |
-| **MATLAB** | `pqc` | MATLAB File Exchange | MEX gateway |
+| **Java** | `com.dyber:pqc` | From `bindings/java` | JNI |
+| **Kotlin** | `com.dyber:pqc-kotlin` | From `bindings/kotlin` | JNI (wraps Java) |
+| **Scala** | `com.dyber:pqc-scala` | From `bindings/scala` | JNI (wraps Java) |
+| **C#** | `PqcDyber` | Project reference to `bindings/csharp` | P/Invoke |
+| **JavaScript** | `@dyber/pqc` | `npm install ./bindings/javascript` | N-API native addon |
+| **TypeScript** | `@dyber/pqc` | `npm install ./bindings/javascript` | Types over JS binding |
+| **PHP** | `dyber/pqc` | From `bindings/php` | PHP FFI |
+| **Ruby** | `pqc-dyber` | From `bindings/ruby` | Ruby FFI |
+| **Swift** | `PQCDyber` | Swift Package Manager (local path `bindings/swift`) | C interop |
+| **Dart** | `pqc_dyber` | Path dependency on `bindings/dart` | dart:ffi |
+| **Perl** | `Crypt::PQC::Dyber` | From `bindings/perl` | XS |
+| **R** | `pqcDyber` | From `bindings/r` | .Call interface |
+| **MATLAB** | `pqc` | From `bindings/matlab` | MEX gateway |
 | **Shell** | `pqc-cli` | Binary in PATH | CLI executable |
 | **ASM** | Direct routines | See `src/asm/` | Documented calling conventions |
 

@@ -2,8 +2,11 @@
 
 ## Installation
 
+The Python package is not published on PyPI. Install it from a clone of
+this repository, after building and installing the C library:
+
 ```bash
-pip install pqc-dyber
+pip install ./bindings/python
 ```
 
 ## Key Encapsulation (KEM)

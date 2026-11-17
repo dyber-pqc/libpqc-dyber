@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code comes from: ML-KEM and ML-DSA are adapted from the pq-crystals
   reference code and HQC is the HQC team's reference implementation. The
   platform table now lists what CI tests.
+- Release: removed the PyPI, crates.io, npm and NuGet publish jobs. The
+  bindings were never published (the jobs had no registry tokens and
+  failed on every release), and the README's `pip install`, `npm install`,
+  `cargo add` and `dotnet add package` lines named packages that are not
+  ours. The README and Python guide now install the bindings from
+  `bindings/` in this repository.
 
 ## [0.3.1] - 2026-11-17
 
