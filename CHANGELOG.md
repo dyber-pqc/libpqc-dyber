@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it for each release tag, tagged with the version and `latest`; it can
   also be run by hand for an existing tag.
 
+### Changed
+
+- README: removed claims the code does not support. There are no SIMD or
+  assembly code paths (the AVX2, AVX-512, NEON, SVE and SHA-NI rows
+  described code that does not exist; CPU features are detected but
+  unused). FN-DSA (FIPS 206) is a draft and does not work yet, so it is
+  off the FIPS badge, and the "17 families" badge counted the eight
+  families that are hidden as not working. "Production-grade" and "built
+  from scratch, not a fork" are replaced by what CI checks and where the
+  code comes from: ML-KEM and ML-DSA are adapted from the pq-crystals
+  reference code and HQC is the HQC team's reference implementation. The
+  platform table now lists what CI tests.
+
 ## [0.3.1] - 2026-11-17
 
 This is a security release. HQC is replaced by the HQC v5.1 reference

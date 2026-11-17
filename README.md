@@ -1,9 +1,9 @@
 <p align="center">
   <h1 align="center">libpqc-dyber</h1>
   <p align="center">
-    <strong>Production-Grade Post-Quantum Cryptography Library</strong>
+    <strong>Post-Quantum Cryptography Library in C</strong>
     <br/>
-    <em>Built from scratch by <a href="https://dyber.com">Dyber, Inc.</a></em>
+    <em>by <a href="https://dyber.com">Dyber, Inc.</a></em>
   </p>
 </p>
 
@@ -14,15 +14,16 @@
   <img src="https://img.shields.io/badge/C11-standard-green.svg" alt="C11">
   <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20FreeBSD-lightgrey.svg" alt="Platforms">
   <img src="https://img.shields.io/badge/languages-20-orange.svg" alt="Languages">
-  <img src="https://img.shields.io/badge/algorithms-17%20families-purple.svg" alt="Algorithms">
-  <img src="https://img.shields.io/badge/FIPS-203%20%7C%20204%20%7C%20205%20%7C%20206-red.svg" alt="FIPS">
+  <img src="https://img.shields.io/badge/FIPS-203%20%7C%20204%20%7C%20205-red.svg" alt="FIPS">
 </p>
 
 ---
 
-**libpqc-dyber** is a comprehensive, cross-platform post-quantum cryptography library implementing all NIST-standardized PQC algorithms and additional schemes. It is designed for production use, with bindings for **20 programming languages** and support for **7+ operating systems**.
+**libpqc-dyber** is a cross-platform post-quantum cryptography library in C11. It implements the three NIST post-quantum standards (ML-KEM, ML-DSA and SLH-DSA), HQC, BIKE, FrodoKEM, the stateful LMS and XMSS signatures, and hybrid schemes with X25519, Ed25519 and P-256, with bindings for 20 languages. It builds and is tested in CI on Linux (x86_64 and ARM64), macOS, Windows and FreeBSD.
 
-This library is **not a fork** of any existing project. Every algorithm is implemented from the published NIST FIPS specifications and academic references by the Dyber, Inc. engineering team.
+Several other families (Classic McEliece, NTRU, NTRU Prime, FN-DSA, MAYO, UOV, SNOVA, CROSS) are present but do not work yet; they are hidden unless explicitly enabled (see [Supported Algorithms](#supported-algorithms)). The library has not been through CAVP or CMVP validation; see [Is this production-ready?](#is-this-production-ready) for what is and is not checked.
+
+**Provenance.** Most of the code is written by Dyber, Inc. from the published specifications. Some algorithms build on public-domain reference implementations: ML-KEM and ML-DSA are adapted from the pq-crystals Kyber and Dilithium reference code, and HQC is the HQC team's v5.1 reference implementation, vendored with the changes listed in [`src/core/kem/hqc/README.md`](src/core/kem/hqc/README.md).
 
 ---
 
@@ -70,14 +71,14 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 
 ## Features
 
-- **Complete PQC coverage** — All NIST FIPS 203/204/205/206 algorithms plus 13 additional KEM and signature scheme families
-- **50+ parameter sets** — Every standardized security level across all algorithm families
-- **20 language bindings** — C, C++, C#, Go, Rust, Java, Python, JavaScript, TypeScript, PHP, Ruby, Swift, Kotlin, Scala, Dart, Perl, R, MATLAB, Shell CLI, ASM
-- **7+ operating systems** — Linux, macOS, Windows, FreeBSD, Fedora, RHEL, Unix
-- **Hardware acceleration** — AVX2, AVX-512, ARM NEON, SVE, SHA-NI, PCLMULQDQ, BMI2
-- **Checked security properties** — Constant-time execution verified with Valgrind (ctgrind) in CI for ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, LMS, XMSS and the hybrids; ML-DSA and SLH-DSA interoperability-tested against OpenSSL; key material zeroized (see [Security](#security) for what is and is not covered)
+- **NIST standards** — ML-KEM (FIPS 203), ML-DSA (FIPS 204) and SLH-DSA (FIPS 205), checked against NIST's ACVP vectors; HQC (selected by NIST, FIPS 207 pending) and BIKE checked against their official known-answer tests
+- **Every security level** — all parameter sets of each working family
+- **20 language bindings** — C, C++, C#, Go, Rust, Java, Python, JavaScript, TypeScript, PHP, Ruby, Swift, Kotlin, Scala, Dart, Perl, R, MATLAB, Shell CLI, ASM. CI builds and tests C++, C#, Go, Rust, Java, Python, JavaScript/TypeScript and the CLI; the others are untested
+- **Cross-platform** — Linux (x86_64, ARM64), macOS (x86_64, Apple Silicon), Windows (MSVC, MinGW) and FreeBSD, all in CI; other C11 platforms best-effort
+- **Portable C** — no SIMD or assembly code paths yet; see [Hardware Acceleration](#hardware-acceleration)
+- **Checked security properties** — Constant-time execution verified with Valgrind (ctgrind) in CI for ML-KEM, ML-DSA, SLH-DSA, HQC, BIKE, FrodoKEM, LMS, XMSS and the hybrids; ML-DSA and SLH-DSA interoperability-tested against OpenSSL; key material zeroized (see [Security](#security) for what is and is not covered)
 - **Hybrid schemes** — Combine PQC with classical algorithms (X25519, Ed25519, NIST P-256)
-- **Stateful signatures** — LMS (RFC 8554) and XMSS (RFC 8391) with safe state management
+- **Stateful signatures** — LMS (RFC 8554) and XMSS (RFC 8391); the caller must persist the updated secret key after every signature, and the H20/H25 parameter sets cannot generate keys yet
 - **Zero external dependencies** — All primitives (SHA-2, SHA-3, SHAKE, Keccak, Curve25519, P-256) implemented in-library
 - **Configurable builds** — Enable/disable individual algorithms at compile time via CMake options
 - **CLI tool** — `pqc-cli` binary for key generation, encapsulation, signing, and verification from the command line
@@ -702,15 +703,14 @@ pqc-cli verify ML-DSA-65 --pk signer.pk --msg document.pdf --sig document.sig
 
 | OS | x86_64 | ARM64 | Compiler | Status |
 |----|--------|-------|----------|--------|
-| **Ubuntu/Debian** | Full + AVX2/AVX-512 | Full + NEON/SVE | gcc, clang | Tier 1 |
-| **Fedora** | Full + AVX2/AVX-512 | Full + NEON/SVE | gcc, clang | Tier 1 |
-| **RHEL 8/9** | Full + AVX2/AVX-512 | Full + NEON/SVE | gcc, clang | Tier 1 |
-| **macOS** | Full + AVX2 | Full + NEON (Apple Silicon) | clang (Xcode) | Tier 1 |
-| **Windows** | Full + AVX2/AVX-512 | Experimental | MSVC, MinGW | Tier 1 |
-| **FreeBSD** | Full + AVX2/AVX-512 | Full + NEON | clang, gcc | Tier 2 |
+| **Linux** (Ubuntu) | Tested | Tested | gcc, clang | Tier 1 |
+| **macOS** | Tested | Tested (Apple Silicon) | clang (Xcode) | Tier 1 |
+| **Windows** | Tested | Not tested | MSVC, MinGW | Tier 1 |
+| **FreeBSD** | Tested | Not tested | clang | Tier 2 |
+| **Other Linux** (Fedora, RHEL, ...) | Expected to work | Expected to work | gcc, clang | Not in CI |
 | **Unix** (generic) | Portable C | Portable C | Any C11 compiler | Best-effort |
 
-**Tier 1**: Tested in CI on every commit. **Tier 2**: Tested in CI, may have minor delays.
+**Tier 1**: built and tested in CI on every commit. **Tier 2**: built and tested in CI in a VM. All platforms run the same portable C code.
 
 ---
 
@@ -904,18 +904,12 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ### Hardware Acceleration
 
-The library detects CPU features at runtime and dispatches to optimized code paths:
-
-| Feature | Platform | Used For |
-|---------|----------|----------|
-| **AVX2** | x86_64 | NTT, polynomial arithmetic, Keccak |
-| **AVX-512** | x86_64 | Parallel Keccak, wide polynomial ops |
-| **SHA-NI** | x86_64 | SHA-256 hardware acceleration |
-| **PCLMULQDQ** | x86_64 | Detected only; no code path uses it yet |
-| **BMI2** | x86_64 | Field arithmetic (Curve25519) |
-| **NEON** | AArch64 | NTT, polynomial arithmetic, Keccak |
-| **SVE** | AArch64 | Scalable vector Keccak |
-| **SHA2 ext** | AArch64 | SHA-256 hardware acceleration |
+None yet. Every algorithm runs portable C on every platform; there is no
+SIMD or assembly implementation of any algorithm. `src/dispatch/dispatch.c`
+detects AVX2, AVX-512, BMI2, SHA-NI and PCLMULQDQ on x86_64 and NEON, SVE
+and the SHA-2/SHA-3 extensions on AArch64, but no code path uses the result.
+Optimized implementations are planned; each will have to pass the same
+known-answer and constant-time checks as the portable code.
 
 ### Benchmarking
 
@@ -986,9 +980,9 @@ libpqc-dyber/
 │   │   │   ├── ntru/        NTRU
 │   │   │   └── ntruprime/   NTRU-Prime
 │   │   ├── sig/             Signature implementations
-│   │   │   ├── mldsa/       ML-DSA (FIPS 204) - FULL IMPLEMENTATION
+│   │   │   ├── mldsa/       ML-DSA (FIPS 204)
 │   │   │   ├── slhdsa/      SLH-DSA (FIPS 205)
-│   │   │   ├── fndsa/       FN-DSA (FIPS 206)
+│   │   │   ├── fndsa/       FN-DSA (FIPS 206 draft; experimental)
 │   │   │   ├── sphincsplus/ SPHINCS+
 │   │   │   ├── mayo/        MAYO
 │   │   │   ├── uov/         UOV
@@ -997,10 +991,7 @@ libpqc-dyber/
 │   │   │   ├── lms/         LMS (stateful)
 │   │   │   └── xmss/        XMSS (stateful)
 │   │   └── hybrid/          Hybrid schemes (PQC + classical)
-│   ├── asm/                 Assembly optimizations
-│   │   ├── x86_64/          AVX2, AVX-512, SHA-NI
-│   │   └── aarch64/         NEON, SVE
-│   └── dispatch/            Runtime CPU feature detection
+│   └── dispatch/            Runtime CPU feature detection (not used yet)
 │
 ├── bindings/                Language bindings (20 languages)
 │   ├── cpp/                 C++ (header-only, RAII)
@@ -1054,9 +1045,9 @@ libpqc-dyber/
 ### What's the difference between libpqc-dyber and liboqs?
 
 Both implement post-quantum algorithms, but libpqc-dyber:
-- Is built entirely from scratch (not a fork)
+- Is not a fork of liboqs; most code is written from the specifications, and ML-KEM, ML-DSA and HQC build on the public-domain reference implementations (see Provenance above)
 - Uses NIST FIPS standard names (ML-KEM, ML-DSA, etc.)
-- Provides 20 language bindings (liboqs has ~5)
+- Provides 20 language bindings (CI tests C++, C#, Go, Rust, Java, Python, JavaScript/TypeScript and the CLI)
 - Has zero external dependencies
 - Includes built-in hybrid scheme support
 - Supports stateful signatures (LMS, XMSS)
@@ -1095,7 +1086,8 @@ FN-DSA key generation fails and MAYO and SNOVA signatures do not verify.
 As of 0.3.0, CI checks ML-KEM (FIPS 203), ML-DSA (FIPS 204) and SLH-DSA
 (FIPS 205) against NIST's ACVP test vectors, and ML-DSA and SLH-DSA
 against OpenSSL 3.5 in both directions; BIKE reproduces its official
-round 4 known-answer tests. The hash layer and the classical hybrid
+round 4 known-answer tests, and as of 0.3.1 HQC reproduces the official
+HQC v5.1 known-answer tests. The hash layer and the classical hybrid
 primitives are checked against published vectors, and these algorithms
 are checked for constant-time execution (see Security). Passing NIST's
 test vectors is not the same as a CAVP or CMVP certificate: the library
@@ -1120,7 +1112,7 @@ See [SECURITY.md](SECURITY.md). Email security@dyber.org. Do **not** open a publ
 
 ### Can I use this in a FIPS-compliant environment?
 
-The library implements the FIPS 203/204/205 standards faithfully. However, the library itself has not yet undergone FIPS 140-3 validation. If you need a FIPS-validated module, contact Dyber, Inc. for enterprise support.
+ML-KEM, ML-DSA and SLH-DSA pass NIST's ACVP test vectors for FIPS 203/204/205. However, the library itself has not yet undergone FIPS 140-3 validation. If you need a FIPS-validated module, contact Dyber, Inc. for enterprise support.
 
 ### How do stateful signatures work?
 
@@ -1155,7 +1147,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 Priority areas:
 - Algorithm implementations (filling in the remaining crypto internals)
-- Performance optimizations (AVX2/NEON assembly)
+- Performance optimizations (AVX2/NEON implementations; none exist yet)
 - Additional test vectors and fuzzing
 - Language binding improvements
 - Documentation and examples
