@@ -76,6 +76,7 @@ set(PQC_CORE_SOURCES
     src/core/common/rand.c
     src/core/common/platform.c
     src/core/common/error.c
+    src/core/common/experimental.c
     src/core/common/hash/sha2.c
     src/core/common/hash/sha3.c
     src/core/common/hash/keccak.c

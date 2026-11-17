@@ -11,19 +11,35 @@
 
 #include "pqc/sig.h"
 #include "pqc/algorithms.h"
+#include "pqc/common.h"
 #include "pqc/pqc_config.h"
 #include "core/sig/sig_internal.h"
 
 static const pqc_sig_vtable_t *sig_vtables[PQC_SIG_MAX_ALGORITHMS];
+/* Set for algorithms known not to work; see pqc_set_experimental(). */
+static unsigned char sig_experimental[PQC_SIG_MAX_ALGORITHMS];
 static int sig_count = 0;
 static int sig_initialized = 0;
+static int sig_registering_experimental = 0;
 
 int pqc_sig_add_vtable(const pqc_sig_vtable_t *vt) {
     if (sig_count >= PQC_SIG_MAX_ALGORITHMS) {
         return -1;
     }
+    sig_experimental[sig_count] = (unsigned char)sig_registering_experimental;
     sig_vtables[sig_count++] = vt;
     return 0;
+}
+
+/* Register an algorithm family that is known not to work. */
+#define REGISTER_EXPERIMENTAL(call) do { \
+        sig_registering_experimental = 1;   \
+        (void)(call);                        \
+        sig_registering_experimental = 0;   \
+    } while (0)
+
+static int sig_visible(int i) {
+    return !sig_experimental[i] || pqc_experimental_enabled();
 }
 
 int pqc_sig_register_all(void) {
@@ -37,22 +53,22 @@ int pqc_sig_register_all(void) {
     pqc_sig_slhdsa_register();
 #endif
 #ifdef PQC_ENABLE_SIG_FNDSA
-    pqc_sig_fndsa_register();
+    REGISTER_EXPERIMENTAL(pqc_sig_fndsa_register());
 #endif
 #ifdef PQC_ENABLE_SIG_SPHINCSPLUS
     pqc_sig_sphincsplus_register();
 #endif
 #ifdef PQC_ENABLE_SIG_MAYO
-    pqc_sig_mayo_register();
+    REGISTER_EXPERIMENTAL(pqc_sig_mayo_register());
 #endif
 #ifdef PQC_ENABLE_SIG_UOV
-    pqc_sig_uov_register();
+    REGISTER_EXPERIMENTAL(pqc_sig_uov_register());
 #endif
 #ifdef PQC_ENABLE_SIG_SNOVA
-    pqc_sig_snova_register();
+    REGISTER_EXPERIMENTAL(pqc_sig_snova_register());
 #endif
 #ifdef PQC_ENABLE_SIG_CROSS
-    pqc_sig_cross_register();
+    REGISTER_EXPERIMENTAL(pqc_sig_cross_register());
 #endif
 #ifdef PQC_ENABLE_SIG_LMS
     pqc_sig_lms_register();
@@ -71,7 +87,7 @@ const pqc_sig_vtable_t *pqc_sig_find_vtable(const char *algorithm) {
     pqc_sig_register_all();
     for (int i = 0; i < sig_count; i++) {
         if (strcmp(sig_vtables[i]->algorithm_name, algorithm) == 0) {
-            return sig_vtables[i];
+            return sig_visible(i) ? sig_vtables[i] : NULL;
         }
     }
     return NULL;
@@ -229,14 +245,31 @@ pqc_status_t pqc_sig_sign_stateful(const PQC_SIG *sig,
 }
 
 int pqc_sig_algorithm_count(void) {
+    int n = 0;
     pqc_sig_register_all();
-    return sig_count;
+    for (int i = 0; i < sig_count; i++)
+        n += sig_visible(i);
+    return n;
 }
 
 const char *pqc_sig_algorithm_name(int index) {
     pqc_sig_register_all();
-    if (index < 0 || index >= sig_count) return NULL;
-    return sig_vtables[index]->algorithm_name;
+    if (index < 0) return NULL;
+    for (int i = 0; i < sig_count; i++) {
+        if (!sig_visible(i)) continue;
+        if (index-- == 0) return sig_vtables[i]->algorithm_name;
+    }
+    return NULL;
+}
+
+int pqc_sig_is_experimental(const char *algorithm) {
+    if (!algorithm) return 0;
+    pqc_sig_register_all();
+    for (int i = 0; i < sig_count; i++) {
+        if (strcmp(sig_vtables[i]->algorithm_name, algorithm) == 0)
+            return sig_experimental[i];
+    }
+    return 0;
 }
 
 int pqc_sig_is_enabled(const char *algorithm) {

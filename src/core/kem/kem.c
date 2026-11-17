@@ -11,19 +11,35 @@
 
 #include "pqc/kem.h"
 #include "pqc/algorithms.h"
+#include "pqc/common.h"
 #include "pqc/pqc_config.h"
 #include "core/kem/kem_internal.h"
 
 static const pqc_kem_vtable_t *kem_vtables[PQC_KEM_MAX_ALGORITHMS];
+/* Set for algorithms known not to work; see pqc_set_experimental(). */
+static unsigned char kem_experimental[PQC_KEM_MAX_ALGORITHMS];
 static int kem_count = 0;
 static int kem_initialized = 0;
+static int kem_registering_experimental = 0;
 
 int pqc_kem_add_vtable(const pqc_kem_vtable_t *vt) {
     if (kem_count >= PQC_KEM_MAX_ALGORITHMS) {
         return -1;
     }
+    kem_experimental[kem_count] = (unsigned char)kem_registering_experimental;
     kem_vtables[kem_count++] = vt;
     return 0;
+}
+
+/* Register an algorithm family that is known not to work. */
+#define REGISTER_EXPERIMENTAL(call) do { \
+        kem_registering_experimental = 1;   \
+        (void)(call);                        \
+        kem_registering_experimental = 0;   \
+    } while (0)
+
+static int kem_visible(int i) {
+    return !kem_experimental[i] || pqc_experimental_enabled();
 }
 
 int pqc_kem_register_all(void) {
@@ -40,16 +56,16 @@ int pqc_kem_register_all(void) {
     pqc_kem_bike_register();
 #endif
 #ifdef PQC_ENABLE_KEM_MCELIECE
-    pqc_kem_mceliece_register();
+    REGISTER_EXPERIMENTAL(pqc_kem_mceliece_register());
 #endif
 #ifdef PQC_ENABLE_KEM_FRODO
     pqc_kem_frodo_register();
 #endif
 #ifdef PQC_ENABLE_KEM_NTRU
-    pqc_kem_ntru_register();
+    REGISTER_EXPERIMENTAL(pqc_kem_ntru_register());
 #endif
 #ifdef PQC_ENABLE_KEM_NTRUPRIME
-    pqc_kem_ntruprime_register();
+    REGISTER_EXPERIMENTAL(pqc_kem_ntruprime_register());
 #endif
 #if defined(PQC_ENABLE_HYBRID_KEM) || defined(PQC_ENABLE_HYBRID)
     pqc_hybrid_kem_register();
@@ -62,7 +78,7 @@ const pqc_kem_vtable_t *pqc_kem_find_vtable(const char *algorithm) {
     pqc_kem_register_all();
     for (int i = 0; i < kem_count; i++) {
         if (strcmp(kem_vtables[i]->algorithm_name, algorithm) == 0) {
-            return kem_vtables[i];
+            return kem_visible(i) ? kem_vtables[i] : NULL;
         }
     }
     return NULL;
@@ -136,14 +152,31 @@ pqc_status_t pqc_kem_decaps(const PQC_KEM *kem, uint8_t *ss, const uint8_t *ct,
 }
 
 int pqc_kem_algorithm_count(void) {
+    int n = 0;
     pqc_kem_register_all();
-    return kem_count;
+    for (int i = 0; i < kem_count; i++)
+        n += kem_visible(i);
+    return n;
 }
 
 const char *pqc_kem_algorithm_name(int index) {
     pqc_kem_register_all();
-    if (index < 0 || index >= kem_count) return NULL;
-    return kem_vtables[index]->algorithm_name;
+    if (index < 0) return NULL;
+    for (int i = 0; i < kem_count; i++) {
+        if (!kem_visible(i)) continue;
+        if (index-- == 0) return kem_vtables[i]->algorithm_name;
+    }
+    return NULL;
+}
+
+int pqc_kem_is_experimental(const char *algorithm) {
+    if (!algorithm) return 0;
+    pqc_kem_register_all();
+    for (int i = 0; i < kem_count; i++) {
+        if (strcmp(kem_vtables[i]->algorithm_name, algorithm) == 0)
+            return kem_experimental[i];
+    }
+    return 0;
 }
 
 int pqc_kem_is_enabled(const char *algorithm) {

@@ -47,6 +47,10 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
     int i;
     (void)argc; (void)argv;
     pqc_init();
+    /* Also exercise the algorithms that are hidden by default as
+     * experimental (known not to work): bounds and memory safety
+     * still matter for them. */
+    pqc_set_experimental(1);
     pqc_set_rng(fuzz_rng, NULL);
     for (i = 0; i < pqc_sig_algorithm_count() && n_algs < MAX_ALGS; i++) {
         const char *name = pqc_sig_algorithm_name(i);

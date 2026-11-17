@@ -146,11 +146,15 @@ typedef struct {
 PQC_API int pqc_kem_algorithm_count(void);
 PQC_API const char *pqc_kem_algorithm_name(int index);
 PQC_API int pqc_kem_is_enabled(const char *algorithm);
+/* 1 if the algorithm is built in and experimental (see pqc_set_experimental) */
+PQC_API int pqc_kem_is_experimental(const char *algorithm);
 
 /* Get list of all enabled signature algorithms */
 PQC_API int pqc_sig_algorithm_count(void);
 PQC_API const char *pqc_sig_algorithm_name(int index);
 PQC_API int pqc_sig_is_enabled(const char *algorithm);
+/* 1 if the algorithm is built in and experimental (see pqc_set_experimental) */
+PQC_API int pqc_sig_is_experimental(const char *algorithm);
 
 /* Get detailed algorithm info */
 PQC_API pqc_status_t pqc_algorithm_info(const char *name, pqc_algorithm_info_t *info);
