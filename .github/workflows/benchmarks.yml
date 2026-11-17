@@ -240,42 +240,50 @@ jobs:
                           pass
               return out
 
-          def best(a, b):
-              return {k: min(a[k], b[k]) for k in set(a) & set(b)}
+          b1, b4 = load("run1-base.csv"), load("run4-base.csv")
+          c2, c3 = load("run2-head.csv"), load("run3-head.csv")
 
-          baseline = best(load("run1-base.csv"), load("run4-base.csv"))
-          current = best(load("run2-head.csv"), load("run3-head.csv"))
+          def spread(x, y):
+              # Run-to-run variation of one side on this machine, in %.
+              return abs(x - y) / min(x, y) * 100.0
 
+          # A change counts only if it exceeds the threshold *plus* the
+          # larger of the two sides' own run-to-run spread for that entry.
+          # Rejection-sampled operations (ML-DSA signing, for one) vary a
+          # lot between runs of identical code; a fixed threshold alone
+          # flags them at random.
           regressions, improvements = [], []
-          for key in sorted(set(baseline) & set(current)):
-              b, c = baseline[key], current[key]
+          for key in sorted(set(b1) & set(b4) & set(c2) & set(c3)):
+              b, c = min(b1[key], b4[key]), min(c2[key], c3[key])
               if b < floor:
                   continue
+              noise = max(spread(b1[key], b4[key]), spread(c2[key], c3[key]))
               pct = (c - b) / b * 100.0
-              if pct > threshold:
-                  regressions.append((key, b, c, pct))
-              elif pct < -threshold:
-                  improvements.append((key, b, c, pct))
+              if pct > threshold + noise:
+                  regressions.append((key, b, c, pct, noise))
+              elif pct < -(threshold + noise):
+                  improvements.append((key, b, c, pct, noise))
 
           lines = ["## Benchmark Comparison Report\n",
-                   f"Base and PR measured on the same runner (ABBA order). "
-                   f"Threshold: {threshold}% | Regressions: {len(regressions)} | "
+                   f"Base and PR measured on the same runner (ABBA order); "
+                   f"a change counts if it exceeds {threshold}% plus that "
+                   f"entry's run-to-run spread. Regressions: {len(regressions)} | "
                    f"Improvements: {len(improvements)}\n"]
 
           def table(title, rows, sign):
               lines.append(f"\n### {title}\n")
-              lines.append("| Algorithm | Operation | Base (ms) | PR (ms) | Change |")
-              lines.append("|-----------|-----------|-----------|---------|--------|")
-              for key, b, c, pct in rows:
+              lines.append("| Algorithm | Operation | Base (ms) | PR (ms) | Change | Run-to-run spread |")
+              lines.append("|-----------|-----------|-----------|---------|--------|-------------------|")
+              for key, b, c, pct, noise in rows:
                   algo, op = key.split(":", 1)
-                  lines.append(f"| {algo} | {op} | {b:.3f} | {c:.3f} | {sign}{pct:.1f}% |")
+                  lines.append(f"| {algo} | {op} | {b:.3f} | {c:.3f} | {sign}{pct:.1f}% | {noise:.1f}% |")
 
           if regressions:
               table("Regressions (slower)", sorted(regressions, key=lambda x: -x[3]), "+")
           if improvements:
               table("Improvements (faster)", sorted(improvements, key=lambda x: x[3]), "")
           if not regressions and not improvements:
-              lines.append(f"\nAll benchmarks within {threshold}% of the base.")
+              lines.append(f"\nAll benchmarks within {threshold}% (plus run-to-run spread) of the base.")
 
           with open("benchmark_summary.md", "w") as f:
               f.write("\n".join(lines))
@@ -283,9 +291,10 @@ jobs:
               f.write(f"has_regression={'true' if regressions else 'false'}\n")
 
           if regressions:
-              print(f"REGRESSION DETECTED: {len(regressions)} benchmarks are >{threshold}% slower")
-              for key, b, c, pct in regressions:
-                  print(f"  {key}: {b:.3f}ms -> {c:.3f}ms (+{pct:.1f}%)")
+              print(f"REGRESSION DETECTED: {len(regressions)} benchmarks are slower "
+                    f"by more than {threshold}% plus their run-to-run spread")
+              for key, b, c, pct, noise in regressions:
+                  print(f"  {key}: {b:.3f}ms -> {c:.3f}ms (+{pct:.1f}%, spread {noise:.1f}%)")
           else:
               print("No performance regressions detected.")
 
@@ -295,6 +304,14 @@ jobs:
         with:
           header: benchmark-results
           path: benchmark_summary.md
+
+      - name: Upload the four runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-check-runs
+          path: run*.csv
+          retention-days: 30
 
       - name: Fail on regression
         if: steps.regression.outputs.has_regression == 'true'
