@@ -89,6 +89,8 @@ int main(void)
         printf("FAIL: pqc_init\n");
         return 1;
     }
+    /* FN-DSA is hidden as experimental until key generation works. */
+    pqc_set_experimental(1);
     for (i = 0; i < 2; i++) {
         int r = run(names[i]);
         if (r < 0) continue;

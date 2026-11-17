@@ -184,6 +184,9 @@ int main(int argc, char **argv)
 {
     int i;
 
+    /* --all covers the experimental algorithms too. */
+    pqc_set_experimental(1);
+
     if (argc == 2 && strcmp(argv[1], "--list") == 0) {
         for (i = 0; i < pqc_kem_algorithm_count(); i++) {
             const char *n = pqc_kem_algorithm_name(i);

@@ -130,6 +130,10 @@ fail:
 
 int main(void) {
     pqc_init();
+    /* Also exercise the algorithms that are hidden by default as
+     * experimental (known not to work): bounds and memory safety
+     * still matter for them. */
+    pqc_set_experimental(1);
 
     printf("libpqc-dyber Signature Tests\n");
     printf("============================\n");

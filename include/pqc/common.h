@@ -81,6 +81,21 @@ PQC_API pqc_status_t pqc_init(void);
 PQC_API void pqc_cleanup(void);
 
 /* -------------------------------------------------------------------------- */
+/* Experimental algorithms                                                     */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Algorithms that are built but known not to work (see CHANGELOG, Known
+ * issues) are hidden by default: pqc_kem_new()/pqc_sig_new() return NULL
+ * for them, pqc_kem_is_enabled()/pqc_sig_is_enabled() return 0, and the
+ * algorithm enumeration skips them. pqc_set_experimental(1), or the
+ * environment variable PQC_ENABLE_EXPERIMENTAL=1, makes them available
+ * for development and testing. Never enable this in production.
+ */
+PQC_API void pqc_set_experimental(int enable);
+PQC_API int pqc_experimental_enabled(void);
+
+/* -------------------------------------------------------------------------- */
 /* Secure memory utilities                                                     */
 /* -------------------------------------------------------------------------- */
 
