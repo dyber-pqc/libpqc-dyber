@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-17
+
+This is a security release. HQC is replaced by the HQC v5.1 reference
+implementation, verified against the official known-answer tests and for
+constant-time execution; HQC keys and ciphertexts change. Algorithms that do
+not yet work are hidden unless the caller opts in. The sanitizer jobs in CI
+now fail the build on a finding.
+
 ### Security
 
 - **HQC was not HQC, and was not constant time.** The code in
@@ -64,6 +72,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ci.yml` are now gates too. They were advisory, and the UBSan job did not
   set `halt_on_error`, so undefined behaviour was printed but never failed a
   test. They now set it, build UBSan at -O1 and run the suites in parallel.
+- CI: the benchmark regression check builds the base commit and the pull
+  request and times both on the same runner, in base/PR/PR/base order. It
+  used to compare against numbers from a different machine. A change
+  counts only if it exceeds the 10% threshold plus that benchmark's own
+  run-to-run spread.
 
 ### Added
 
