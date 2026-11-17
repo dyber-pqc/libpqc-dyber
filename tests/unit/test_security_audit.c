@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "pqc/pqc.h"
+#include "pqc/pqc_config.h"
 
 /* Internal headers for the invariant checks. */
 #include "core/sig/xmss/xmss.h"
@@ -802,6 +803,107 @@ static void test_declared_sizes(void)
           "SNOVA-28-17-3 SIGBYTES == 16 + ceil(n*l*l/2)");
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Experimental algorithms are hidden unless the caller opts in        */
+/* ------------------------------------------------------------------ */
+
+static int listed_kem(const char *name)
+{
+    for (int i = 0; i < pqc_kem_algorithm_count(); i++)
+        if (strcmp(pqc_kem_algorithm_name(i), name) == 0) return 1;
+    return 0;
+}
+
+static int listed_sig(const char *name)
+{
+    for (int i = 0; i < pqc_sig_algorithm_count(); i++)
+        if (strcmp(pqc_sig_algorithm_name(i), name) == 0) return 1;
+    return 0;
+}
+
+static void test_experimental_gate(void)
+{
+    /* Only the families this build includes (see pqc/pqc_config.h). */
+    static const char *bad_kem[] = {
+#ifdef PQC_ENABLE_KEM_MCELIECE
+        "Classic-McEliece-348864",
+#endif
+#ifdef PQC_ENABLE_KEM_NTRU
+        "NTRU-HPS-2048-509",
+#endif
+#ifdef PQC_ENABLE_KEM_NTRUPRIME
+        "sntrup761",
+#endif
+        NULL
+    };
+    static const char *bad_sig[] = {
+#ifdef PQC_ENABLE_SIG_FNDSA
+        "FN-DSA-512",
+#endif
+#ifdef PQC_ENABLE_SIG_MAYO
+        "MAYO-1",
+#endif
+#ifdef PQC_ENABLE_SIG_UOV
+        "UOV-Is",
+#endif
+#ifdef PQC_ENABLE_SIG_SNOVA
+        "SNOVA-24-5-4",
+#endif
+#ifdef PQC_ENABLE_SIG_CROSS
+        "CROSS-RSDP-128-fast",
+#endif
+        NULL
+    };
+    char msg[128];
+    size_t i;
+
+    printf("\n[0] Experimental algorithms are hidden by default\n");
+
+    pqc_set_experimental(0);
+    check(!pqc_experimental_enabled(), "opt-in is off");
+    for (i = 0; bad_kem[i] != NULL; i++) {
+        PQC_KEM *k = pqc_kem_new(bad_kem[i]);
+        snprintf(msg, sizeof msg, "%s: hidden (new, is_enabled, list)",
+                 bad_kem[i]);
+        check(k == NULL && !pqc_kem_is_enabled(bad_kem[i]) &&
+              !listed_kem(bad_kem[i]) &&
+              pqc_kem_is_experimental(bad_kem[i]), msg);
+        pqc_kem_free(k);
+    }
+    for (i = 0; bad_sig[i] != NULL; i++) {
+        PQC_SIG *s = pqc_sig_new(bad_sig[i]);
+        snprintf(msg, sizeof msg, "%s: hidden (new, is_enabled, list)",
+                 bad_sig[i]);
+        check(s == NULL && !pqc_sig_is_enabled(bad_sig[i]) &&
+              !listed_sig(bad_sig[i]) &&
+              pqc_sig_is_experimental(bad_sig[i]), msg);
+        pqc_sig_free(s);
+    }
+#ifdef PQC_ENABLE_KEM_MLKEM
+    check(listed_kem("ML-KEM-768") && !pqc_kem_is_experimental("ML-KEM-768"),
+          "ML-KEM-768: listed, not experimental");
+#endif
+#ifdef PQC_ENABLE_SIG_MLDSA
+    check(listed_sig("ML-DSA-65") && !pqc_sig_is_experimental("ML-DSA-65"),
+          "ML-DSA-65: listed, not experimental");
+#endif
+
+    pqc_set_experimental(1);
+    for (i = 0; bad_sig[i] != NULL; i++) {
+        PQC_SIG *s = pqc_sig_new(bad_sig[i]);
+        snprintf(msg, sizeof msg, "%s: available after opt-in", bad_sig[i]);
+        check(s != NULL && listed_sig(bad_sig[i]), msg);
+        pqc_sig_free(s);
+    }
+    for (i = 0; bad_kem[i] != NULL; i++) {
+        PQC_KEM *k = pqc_kem_new(bad_kem[i]);
+        snprintf(msg, sizeof msg, "%s: available after opt-in", bad_kem[i]);
+        check(k != NULL && listed_kem(bad_kem[i]), msg);
+        pqc_kem_free(k);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 
 int main(int argc, char **argv)
@@ -818,6 +920,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    RUN("gate",    test_experimental_gate);
+    /* The groups below exercise experimental algorithms on purpose. */
+    pqc_set_experimental(1);
     RUN("sizes",   test_declared_sizes);
     RUN("bounds",  test_sig_buffer_bounds);
 #ifdef PQC_TEST_XMSS_INTERNALS

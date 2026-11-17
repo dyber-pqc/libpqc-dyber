@@ -5,6 +5,90 @@ All notable changes to libpqc-dyber will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.3.1] - 2026-11-17
+
+This is a security release. HQC is replaced by the HQC v5.1 reference
+implementation, verified against the official known-answer tests and for
+constant-time execution; HQC keys and ciphertexts change. Algorithms that do
+not yet work are hidden unless the caller opts in. The sanitizer jobs in CI
+now fail the build on a finding.
+
+### Security
+
+- **HQC was not HQC, and was not constant time.** The code in
+  `src/core/kem/hqc` used its own hashes, samplers, key format and
+  shared-secret derivation (SHA-512 of the message and ciphertext, a
+  64-byte secret, an 80-byte secret key holding the public key), so
+  nothing it produced interoperated with any other HQC implementation.
+  The 0.3.0 ctgrind run also found eight timing leaks in each parameter
+  set: a fixed-weight sampler that branched and indexed on secret
+  positions, multiplication indexed by secret positions, table-based
+  GF(2^8) arithmetic and a branching decoder.
+
+  It is replaced by the HQC team's reference implementation of HQC v5.1
+  (tag v5.1.0 of gitlab.com/pqc-hqc/hqc, public domain), vendored in
+  `src/core/kem/hqc/ref` with the changes listed in
+  `src/core/kem/hqc/README.md`. It reproduces all 300 official
+  known-answer vectors (see Added). One of those changes fixes a
+  portability bug upstream: `BITMASK` shifted `1UL`, which is 32 bits on
+  Windows, and for HQC-5 the shift count is 37, so with MSVC HQC-256
+  produced keys and ciphertexts that matched none of the official vectors
+  while still decapsulating its own output.
+
+  Under ctgrind it is clean at all three levels, and HQC is now in the CI
+  gate. The one finding was the rejection sampler for the secret vectors,
+  whose iteration count reveals how many candidates it rejected; the
+  specification defines that sampler, the rejected values are discarded,
+  and the accept bit is declassified with a comment saying so.
+- **Algorithms that do not work are hidden unless the caller opts in.**
+  Classic McEliece, NTRU, NTRU Prime, MAYO, UOV, SNOVA, CROSS and FN-DSA
+  (see Known issues) were registered like any other algorithm, so
+  `pqc_kem_new("MAYO-1")` returned a handle that looked usable. Now
+  `pqc_kem_new()`/`pqc_sig_new()` return NULL for them,
+  `pqc_*_is_enabled()` returns 0 and the enumeration skips them, unless
+  the caller calls `pqc_set_experimental(1)` or sets
+  `PQC_ENABLE_EXPERIMENTAL=1`. `pqc_kem_is_experimental()` and
+  `pqc_sig_is_experimental()` report which ones are affected. The code is
+  still built and still covered by the bounds, size, implicit-rejection
+  and fuzz tests.
+
+### Changed
+
+- **HQC keys, ciphertexts and shared secrets all change**, to the v5.1
+  encodings: secret keys are 32 bytes (the KEM seed), public keys 2,241 /
+  4,514 / 7,237 bytes, ciphertexts 4,433 / 8,978 / 14,421 bytes, and the
+  shared secret 32 bytes (was 64). Keys from earlier releases do not work
+  and must be regenerated. The algorithm names stay HQC-128, HQC-192 and
+  HQC-256. FIPS 207 is not final; HQC will follow it when it is.
+- CI: the Security Audit's full-suite AddressSanitizer,
+  UndefinedBehaviorSanitizer and MemorySanitizer jobs are now gates. On
+  the 0.3.0 release the UBSan job ran out of its 60 minutes after every
+  completed suite had passed, and `continue-on-error` reported it as
+  advisory. The suites now run in parallel within a 90-minute limit, and a
+  finding or a timeout fails the run.
+- CI: the per-commit Sanitizers (address, undefined, memory) jobs in
+  `ci.yml` are now gates too. They were advisory, and the UBSan job did not
+  set `halt_on_error`, so undefined behaviour was printed but never failed a
+  test. They now set it, build UBSan at -O1 and run the suites in parallel.
+- CI: the benchmark regression check builds the base commit and the pull
+  request and times both on the same runner, in base/PR/PR/base order. It
+  used to compare against numbers from a different machine. A change
+  counts only if it exceeds the 10% threshold plus that benchmark's own
+  run-to-run spread.
+
+### Added
+
+- `pqc_set_experimental()`, `pqc_experimental_enabled()`,
+  `pqc_kem_is_experimental()`, `pqc_sig_is_experimental()`.
+- **Known-answer tests for HQC.** `tests/kat/test_kat_hqc` regenerates
+  the official `kats/ref/hqc-{1,3,5}/PQCkemKAT_32.rsp` files (100 vectors
+  each, NIST's AES-256 CTR DRBG) and compares their SHA-256 with the
+  published files', decapsulates every vector, and checks that a
+  ciphertext modified in u, v or the salt decapsulates to the rejection
+  secret computed independently from the specification.
+
 ## [0.3.0] - 2026-11-16
 
 This is a security and conformance release.
