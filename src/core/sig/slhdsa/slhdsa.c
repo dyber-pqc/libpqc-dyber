@@ -19,6 +19,7 @@
 #include "pqc/rand.h"
 #include "core/sig/sig_internal.h"
 #include "slhdsa.h"
+#include "core/common/ct_check.h"
 
 /* ------------------------------------------------------------------ */
 /* Hash dispatch functions                                              */
@@ -53,25 +54,27 @@ void slhdsa_prf(uint8_t *out,
 void slhdsa_prf_msg(uint8_t *out,
                      const uint8_t *sk_prf,
                      const uint8_t *opt_rand,
+                     const uint8_t *pfx, size_t pfxlen,
                      const uint8_t *msg, size_t msglen,
                      const slhdsa_params_t *p)
 {
     if (p->hash_id == SLHDSA_HASH_SHA2)
-        slhdsa_prf_msg_sha2(out, sk_prf, opt_rand, msg, msglen, p);
+        slhdsa_prf_msg_sha2(out, sk_prf, opt_rand, pfx, pfxlen, msg, msglen, p);
     else
-        slhdsa_prf_msg_shake(out, sk_prf, opt_rand, msg, msglen, p);
+        slhdsa_prf_msg_shake(out, sk_prf, opt_rand, pfx, pfxlen, msg, msglen, p);
 }
 
 void slhdsa_hash_msg(uint8_t *out,
                       const uint8_t *r,
                       const uint8_t *pk,
+                      const uint8_t *pfx, size_t pfxlen,
                       const uint8_t *msg, size_t msglen,
                       const slhdsa_params_t *p)
 {
     if (p->hash_id == SLHDSA_HASH_SHA2)
-        slhdsa_hash_msg_sha2(out, r, pk, msg, msglen, p);
+        slhdsa_hash_msg_sha2(out, r, pk, pfx, pfxlen, msg, msglen, p);
     else
-        slhdsa_hash_msg_shake(out, r, pk, msg, msglen, p);
+        slhdsa_hash_msg_shake(out, r, pk, pfx, pfxlen, msg, msglen, p);
 }
 
 /* ------------------------------------------------------------------ */
@@ -173,6 +176,7 @@ int pqc_slhdsa_keygen(uint8_t *pk, uint8_t *sk,
 /* ------------------------------------------------------------------ */
 
 int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
+                     const uint8_t *pfx, size_t pfxlen,
                      const uint8_t *msg, size_t msglen,
                      const uint8_t *sk,
                      const slhdsa_params_t *p)
@@ -195,21 +199,27 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
     /* Construct PK for hashing */
     memcpy(pk, pk_seed, n);
     memcpy(pk + n, pk_root, n);
+    /* PK.seed || PK.root is the public key. */
+    PQC_CT_DECLASSIFY(pk, 2 * n);
 
     /* Generate randomizer.  Use random opt_rand for hedged signing. */
     if (pqc_randombytes(opt_rand, n) != PQC_OK)
         return (int)PQC_ERROR_RNG_FAILED;
 
     /* R = PRF_msg(SK.prf, opt_rand, M) */
-    slhdsa_prf_msg(sig_ptr, sk_prf, opt_rand, msg, msglen, p);
-    /* sig_ptr[0..n-1] is now R */
+    slhdsa_prf_msg(sig_ptr, sk_prf, opt_rand, pfx, pfxlen, msg, msglen, p);
+    /* sig_ptr[0..n-1] is now R, the first component of the signature.
+     * With R public, the digest -- and the FORS indices, tree index and
+     * leaf index taken from it -- are a function of public values only,
+     * which is how the verifier recomputes them (FIPS 205 Algorithm 20). */
+    PQC_CT_DECLASSIFY(sig_ptr, n);
 
     /* Compute message digest.
      * Zero the buffer first: split_digest may read more bytes than
      * hash_msg writes (ka_bytes + tree_bytes + leaf_bytes can exceed
      * ceil((k*a + h)/8) due to byte-boundary rounding). */
     memset(digest, 0, sizeof(digest));
-    slhdsa_hash_msg(digest, sig_ptr, pk, msg, msglen, p);
+    slhdsa_hash_msg(digest, sig_ptr, pk, pfx, pfxlen, msg, msglen, p);
 
     sig_ptr += n; /* advance past R */
 
@@ -227,6 +237,10 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
 
     /* Compute FORS public key for hypertree signing */
     slhdsa_fors_pk_from_sig(fors_pk, sig_ptr, md, pk_seed, addr, p);
+    /* The verifier recomputes the FORS public key from the signature
+     * (Algorithm 20, line 13), so it is public; the hypertree's WOTS+
+     * signature branches on its base-w digits. */
+    PQC_CT_DECLASSIFY(fors_pk, n);
 
     sig_ptr += p->fors_sig_bytes;
 
@@ -248,7 +262,8 @@ int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
 /* 5. Verify hypertree signature on FORS public key                     */
 /* ------------------------------------------------------------------ */
 
-int pqc_slhdsa_verify(const uint8_t *msg, size_t msglen,
+int pqc_slhdsa_verify(const uint8_t *pfx, size_t pfxlen,
+                       const uint8_t *msg, size_t msglen,
                        const uint8_t *sig, size_t siglen,
                        const uint8_t *pk,
                        const slhdsa_params_t *p)
@@ -279,7 +294,7 @@ int pqc_slhdsa_verify(const uint8_t *msg, size_t msglen,
      * hash_msg writes (ka_bytes + tree_bytes + leaf_bytes can exceed
      * ceil((k*a + h)/8) due to byte-boundary rounding). */
     memset(digest, 0, sizeof(digest));
-    slhdsa_hash_msg(digest, r, pk, msg, msglen, p);
+    slhdsa_hash_msg(digest, r, pk, pfx, pfxlen, msg, msglen, p);
 
     /* Split digest */
     split_digest(digest, p, md, &idx_tree, &idx_leaf);
@@ -303,6 +318,50 @@ int pqc_slhdsa_verify(const uint8_t *msg, size_t msglen,
 }
 
 /* ------------------------------------------------------------------ */
+/* Pure SLH-DSA with a context string (FIPS 205 Algorithms 22 and 24)   */
+/*                                                                      */
+/* M' = toByte(0, 1) || toByte(|ctx|, 1) || ctx || M. Before 0.3.0 the  */
+/* SLH-DSA names signed M directly -- slh_sign_internal -- so their     */
+/* signatures did not verify under a conformant implementation, and a   */
+/* context string could not be bound at all.                            */
+/* ------------------------------------------------------------------ */
+
+int pqc_slhdsa_sign_ctx(uint8_t *sig, size_t *siglen,
+                         const uint8_t *msg, size_t msglen,
+                         const uint8_t *ctx, size_t ctxlen,
+                         const uint8_t *sk,
+                         const slhdsa_params_t *p)
+{
+    uint8_t pfx[2 + SLHDSA_MAX_CTX_BYTES];
+
+    if (ctxlen > SLHDSA_MAX_CTX_BYTES || (ctxlen && !ctx))
+        return (int)PQC_ERROR_INVALID_ARGUMENT;
+    pfx[0] = 0x00;
+    pfx[1] = (uint8_t)ctxlen;
+    if (ctxlen)
+        memcpy(pfx + 2, ctx, ctxlen);
+    return pqc_slhdsa_sign(sig, siglen, pfx, 2 + ctxlen, msg, msglen, sk, p);
+}
+
+int pqc_slhdsa_verify_ctx(const uint8_t *msg, size_t msglen,
+                           const uint8_t *ctx, size_t ctxlen,
+                           const uint8_t *sig, size_t siglen,
+                           const uint8_t *pk,
+                           const slhdsa_params_t *p)
+{
+    uint8_t pfx[2 + SLHDSA_MAX_CTX_BYTES];
+
+    /* Algorithm 24 step 1: |ctx| > 255 is "return false". */
+    if (ctxlen > SLHDSA_MAX_CTX_BYTES || (ctxlen && !ctx))
+        return (int)PQC_ERROR_VERIFICATION_FAILED;
+    pfx[0] = 0x00;
+    pfx[1] = (uint8_t)ctxlen;
+    if (ctxlen)
+        memcpy(pfx + 2, ctx, ctxlen);
+    return pqc_slhdsa_verify(pfx, 2 + ctxlen, msg, msglen, sig, siglen, pk, p);
+}
+
+/* ------------------------------------------------------------------ */
 /* Vtable wrapper functions                                             */
 /*                                                                      */
 /* Each parameter set gets keygen/sign/verify wrappers that call the    */
@@ -321,8 +380,8 @@ static pqc_status_t slhdsa_##suffix##_sign(                              \
         const uint8_t *msg, size_t msglen,                               \
         const uint8_t *sk)                                               \
 {                                                                        \
-    return (pqc_status_t)pqc_slhdsa_sign(sig, siglen, msg, msglen,       \
-                                          sk, params_ptr);               \
+    return (pqc_status_t)pqc_slhdsa_sign_ctx(sig, siglen, msg, msglen,   \
+                                              NULL, 0, sk, params_ptr);  \
 }                                                                        \
                                                                          \
 static pqc_status_t slhdsa_##suffix##_verify(                            \
@@ -330,8 +389,31 @@ static pqc_status_t slhdsa_##suffix##_verify(                            \
         const uint8_t *sig, size_t siglen,                               \
         const uint8_t *pk)                                               \
 {                                                                        \
-    return (pqc_status_t)pqc_slhdsa_verify(msg, msglen, sig, siglen,     \
-                                            pk, params_ptr);             \
+    return (pqc_status_t)pqc_slhdsa_verify_ctx(msg, msglen, NULL, 0,     \
+                                                sig, siglen, pk,         \
+                                                params_ptr);             \
+}                                                                        \
+                                                                         \
+static pqc_status_t slhdsa_##suffix##_sign_ctx(                          \
+        uint8_t *sig, size_t *siglen,                                    \
+        const uint8_t *msg, size_t msglen,                               \
+        const uint8_t *ctx, size_t ctxlen,                               \
+        const uint8_t *sk)                                               \
+{                                                                        \
+    return (pqc_status_t)pqc_slhdsa_sign_ctx(sig, siglen, msg, msglen,   \
+                                              ctx, ctxlen, sk,           \
+                                              params_ptr);               \
+}                                                                        \
+                                                                         \
+static pqc_status_t slhdsa_##suffix##_verify_ctx(                        \
+        const uint8_t *msg, size_t msglen,                               \
+        const uint8_t *ctx, size_t ctxlen,                               \
+        const uint8_t *sig, size_t siglen,                               \
+        const uint8_t *pk)                                               \
+{                                                                        \
+    return (pqc_status_t)pqc_slhdsa_verify_ctx(msg, msglen, ctx, ctxlen, \
+                                                sig, siglen, pk,         \
+                                                params_ptr);             \
 }
 
 DEFINE_SLHDSA_VTABLE_OPS(sha2_128s,  &SLHDSA_SHA2_128S)
@@ -364,6 +446,8 @@ static const pqc_sig_vtable_t slhdsa_##suffix##_vtable = {           \
     .sign    = slhdsa_##suffix##_sign,                               \
     .verify  = slhdsa_##suffix##_verify,                             \
     .sign_stateful = NULL,                                           \
+    .sign_ctx      = slhdsa_##suffix##_sign_ctx,                     \
+    .verify_ctx    = slhdsa_##suffix##_verify_ctx,                   \
 }
 
 /* SHA2 variants */

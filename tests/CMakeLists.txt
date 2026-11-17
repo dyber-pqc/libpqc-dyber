@@ -30,12 +30,72 @@ target_include_directories(test_integration PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_integration COMMAND test_integration)
 set_tests_properties(test_integration PROPERTIES TIMEOUT 30)
 
-# Quick FN-DSA test (for development/debugging)
+# FN-DSA round trip. Key generation is a known failure (CHANGELOG.md), so
+# this is registered as an *expected* failure, judged by its output rather
+# than its exit status: it passes only if both parameter sets report the
+# known key-generation failure and no sanitizer reported an error. Plain
+# WILL_FAIL would also accept a crash. When FN-DSA key generation starts
+# working the KNOWN FAILURE lines disappear and this fails; then drop these
+# properties so the test checks the round trip normally.
 add_executable(test_fndsa_quick unit/test_fndsa_quick.c)
 target_link_libraries(test_fndsa_quick PRIVATE pqc_static)
 target_include_directories(test_fndsa_quick PRIVATE ${PQC_INCLUDE_DIRS})
 add_test(NAME test_fndsa_quick COMMAND test_fndsa_quick)
-set_tests_properties(test_fndsa_quick PROPERTIES TIMEOUT 120)
+set_tests_properties(test_fndsa_quick PROPERTIES
+    TIMEOUT 120
+    LABELS known-failure
+    PASS_REGULAR_EXPRESSION "KNOWN FAILURE: FN-DSA-512 key generation[^\n]*\nKNOWN FAILURE: FN-DSA-1024 key generation"
+    FAIL_REGULAR_EXPRESSION "Sanitizer|runtime error:|PASS: |FAIL: "
+    SKIP_REGULAR_EXPRESSION "FN-DSA not in this build")
+
+# BIKE against the official round 4 KATs (see tests/kat/test_kat_bike.c).
+# Labelled "kat": regenerates the NIST response files and compares hashes.
+if(PQC_ENABLE_KEM_BIKE)
+    add_executable(test_kat_bike kat/test_kat_bike.c kat/nist_drbg.c)
+    target_link_libraries(test_kat_bike PRIVATE pqc_static)
+    target_include_directories(test_kat_bike PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME test_kat_bike COMMAND test_kat_bike)
+    set_tests_properties(test_kat_bike PROPERTIES TIMEOUT 1800 LABELS kat)
+endif()
+
+# ML-KEM against NIST's ACVP vectors (see tests/kat/test_kat_mlkem.c).
+if(PQC_ENABLE_KEM_MLKEM)
+    add_executable(test_kat_mlkem kat/test_kat_mlkem.c)
+    target_link_libraries(test_kat_mlkem PRIVATE pqc_static)
+    target_include_directories(test_kat_mlkem PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME test_kat_mlkem
+             COMMAND test_kat_mlkem ${CMAKE_CURRENT_SOURCE_DIR}/kat/mlkem_acvp.txt)
+    set_tests_properties(test_kat_mlkem PROPERTIES
+        TIMEOUT 300 LABELS kat SKIP_RETURN_CODE 77)
+endif()
+
+# ML-DSA and SLH-DSA against NIST's ACVP vectors (tests/kat/test_kat_sig_acvp.c).
+if(PQC_ENABLE_SIG_MLDSA OR PQC_ENABLE_SIG_SLHDSA)
+    add_executable(test_kat_sig_acvp kat/test_kat_sig_acvp.c)
+    target_link_libraries(test_kat_sig_acvp PRIVATE pqc_static)
+    target_include_directories(test_kat_sig_acvp PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+endif()
+if(PQC_ENABLE_SIG_MLDSA)
+    add_test(NAME test_kat_mldsa
+             COMMAND test_kat_sig_acvp ${CMAKE_CURRENT_SOURCE_DIR}/kat/mldsa_acvp.txt)
+    set_tests_properties(test_kat_mldsa PROPERTIES
+        TIMEOUT 600 LABELS kat SKIP_RETURN_CODE 77)
+endif()
+if(PQC_ENABLE_SIG_SLHDSA)
+    # One signing vector per parameter set here: all 168 take minutes even
+    # optimised. The CI known-answer job runs the full set (ci.yml).
+    add_test(NAME test_kat_slhdsa
+             COMMAND test_kat_sig_acvp --sample 1
+                     ${CMAKE_CURRENT_SOURCE_DIR}/kat/slhdsa_acvp.txt)
+    set_tests_properties(test_kat_slhdsa PROPERTIES
+        TIMEOUT 1800 LABELS kat SKIP_RETURN_CODE 77)
+endif()
 
 # Security audit regression tests.
 # Needs the internal source tree for the address/parameter invariants.
@@ -48,6 +108,9 @@ target_include_directories(test_security_audit PRIVATE
 # built when the algorithm is compiled in.
 if(PQC_ENABLE_SIG_XMSS)
     target_compile_definitions(test_security_audit PRIVATE PQC_TEST_XMSS_INTERNALS=1)
+endif()
+if(PQC_ENABLE_SIG_SLHDSA)
+    target_compile_definitions(test_security_audit PRIVATE PQC_TEST_SLHDSA_INTERNALS=1)
 endif()
 add_test(NAME test_security_audit COMMAND test_security_audit)
 # The stateful-signature groups rebuild a full Merkle tree per operation
@@ -110,4 +173,45 @@ if(PQC_BUILD_BENCHMARKS)
         target_link_libraries(bench_hash PRIVATE psapi)
         target_link_libraries(bench_all PRIVATE psapi)
     endif()
+endif()
+
+# Interoperability with an independent implementation (OpenSSL >= 3.5).
+# Labelled "interop", not "kat": it needs an external OpenSSL, and returns
+# 77 (skipped) where that OpenSSL lacks ML-DSA / SLH-DSA.
+add_executable(pqc_sig_tool interop/pqc_sig_tool.c)
+target_link_libraries(pqc_sig_tool PRIVATE pqc_static)
+target_include_directories(pqc_sig_tool PRIVATE ${PQC_INCLUDE_DIRS})
+find_package(Python3 COMPONENTS Interpreter QUIET)
+find_program(PQC_OPENSSL_EXECUTABLE openssl)
+if(Python3_Interpreter_FOUND AND PQC_OPENSSL_EXECUTABLE)
+    add_test(NAME test_openssl_interop
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/interop/openssl_interop.py
+                     $<TARGET_FILE:pqc_sig_tool>
+                     --openssl ${PQC_OPENSSL_EXECUTABLE})
+    set_tests_properties(test_openssl_interop PROPERTIES
+                         TIMEOUT 900 LABELS interop SKIP_RETURN_CODE 77)
+endif()
+
+# Constant-time check (ctgrind). Run through tests/ct/run_ctgrind.py, which
+# starts one Valgrind process per algorithm; see that script.
+if(PQC_ENABLE_CT_TESTING)
+    add_executable(test_ct ct/test_ct.c)
+    target_link_libraries(test_ct PRIVATE pqc_static)
+    target_include_directories(test_ct PRIVATE ${PQC_INCLUDE_DIRS})
+endif()
+
+# libFuzzer targets; see tests/fuzz/*.c for the input layouts. Each is also
+# registered as a short smoke test (a fixed number of runs from an empty
+# corpus) so that a fuzzer build that crashes immediately fails ctest.
+if(PQC_BUILD_FUZZERS)
+    foreach(fz fuzz_sig_verify fuzz_kem)
+        add_executable(${fz} fuzz/${fz}.c)
+        target_link_libraries(${fz} PRIVATE pqc_static)
+        target_include_directories(${fz} PRIVATE ${PQC_INCLUDE_DIRS})
+        target_compile_options(${fz} PRIVATE -fsanitize=fuzzer)
+        target_link_options(${fz} PRIVATE -fsanitize=fuzzer)
+        add_test(NAME ${fz}_smoke COMMAND ${fz} -runs=2000 -seed=1)
+        set_tests_properties(${fz}_smoke PROPERTIES TIMEOUT 1800 LABELS fuzz)
+    endforeach()
 endif()

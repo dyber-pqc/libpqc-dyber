@@ -69,6 +69,7 @@ void slhdsa_prf_shake(uint8_t *out,
 void slhdsa_prf_msg_shake(uint8_t *out,
                            const uint8_t *sk_prf,
                            const uint8_t *opt_rand,
+                           const uint8_t *pfx, size_t pfxlen,
                            const uint8_t *msg, size_t msglen,
                            const slhdsa_params_t *p)
 {
@@ -78,6 +79,8 @@ void slhdsa_prf_msg_shake(uint8_t *out,
     pqc_shake256_init(&ctx);
     pqc_shake256_absorb(&ctx, sk_prf, n);
     pqc_shake256_absorb(&ctx, opt_rand, n);
+    if (pfxlen)
+        pqc_shake256_absorb(&ctx, pfx, pfxlen);
     pqc_shake256_absorb(&ctx, msg, msglen);
     pqc_shake256_finalize(&ctx);
     pqc_shake256_squeeze(&ctx, out, n);
@@ -92,18 +95,20 @@ void slhdsa_prf_msg_shake(uint8_t *out,
 void slhdsa_hash_msg_shake(uint8_t *out,
                             const uint8_t *r,
                             const uint8_t *pk,
+                            const uint8_t *pfx, size_t pfxlen,
                             const uint8_t *msg, size_t msglen,
                             const slhdsa_params_t *p)
 {
     uint32_t n = p->n;
-    size_t digest_bits = (size_t)(p->k) * p->a + p->h;
-    size_t digest_bytes = (digest_bits + 7) / 8;
+    size_t digest_bytes = slhdsa_hmsg_bytes(p);  /* FIPS 205 m; see slhdsa_params.h */
     pqc_shake256_ctx ctx;
 
     pqc_shake256_init(&ctx);
     pqc_shake256_absorb(&ctx, r, n);
     pqc_shake256_absorb(&ctx, pk, n);          /* PK.seed */
     pqc_shake256_absorb(&ctx, pk + n, n);      /* PK.root */
+    if (pfxlen)
+        pqc_shake256_absorb(&ctx, pfx, pfxlen);
     pqc_shake256_absorb(&ctx, msg, msglen);
     pqc_shake256_finalize(&ctx);
     pqc_shake256_squeeze(&ctx, out, digest_bytes);

@@ -25,6 +25,7 @@
 #include "core/sig/mldsa/rounding.h"
 #include "core/sig/mldsa/hint.h"
 #include "core/common/hash/sha3.h"
+#include "core/common/ct_check.h"
 
 /* ================================================================= */
 /*  Parameter set definitions                                          */
@@ -86,6 +87,42 @@ const pqc_mldsa_params_t PQC_MLDSA_87 = {
     .sk_bytes       = PQC_MLDSA87_SECRETKEYBYTES,
     .sig_bytes      = PQC_MLDSA87_SIGBYTES,
 };
+
+/* ================================================================= */
+/*  Message representative (FIPS 204 Algorithms 2, 3, 7 and 8)        */
+/* ================================================================= */
+
+/*
+ * mu = H(tr || M', 64), where M' = 0x00 || IntegerToBytes(|ctx|, 1) || ctx || M
+ * is the pure ML-DSA message formatting of FIPS 204 section 5.2.
+ *
+ * Until 0.3.0 this library computed mu = H(tr || M), i.e. it ran
+ * ML-DSA.Sign_internal on the raw message. That is a different function from
+ * ML-DSA.Sign: its signatures do not verify under any conformant
+ * implementation, and it gave callers no way to bind a context string. The
+ * leading 0x00 is the domain separator between pure ML-DSA and HashML-DSA
+ * (which uses 0x01); HashML-DSA is not implemented here.
+ */
+static void mldsa_compute_mu(uint8_t mu[PQC_MLDSA_CRHBYTES],
+                             const uint8_t tr[PQC_MLDSA_TRBYTES],
+                             const uint8_t *ctx, size_t ctxlen,
+                             const uint8_t *msg, size_t msglen)
+{
+    pqc_shake256_ctx state;
+    uint8_t prefix[2];
+
+    prefix[0] = 0x00;
+    prefix[1] = (uint8_t)ctxlen;   /* callers have checked ctxlen <= 255 */
+
+    pqc_shake256_init(&state);
+    pqc_shake256_absorb(&state, tr, PQC_MLDSA_TRBYTES);
+    pqc_shake256_absorb(&state, prefix, sizeof prefix);
+    if (ctxlen)
+        pqc_shake256_absorb(&state, ctx, ctxlen);
+    pqc_shake256_absorb(&state, msg, msglen);
+    pqc_shake256_finalize(&state);
+    pqc_shake256_squeeze(&state, mu, PQC_MLDSA_CRHBYTES);
+}
 
 /* ================================================================= */
 /*  ML-DSA.KeyGen                                                      */
@@ -161,11 +198,26 @@ pqc_status_t pqc_mldsa_keygen(const pqc_mldsa_params_t *params,
 /* ================================================================= */
 /*  ML-DSA.Sign                                                        */
 /*  Reference: crypto_sign_signature_internal in pq-crystals/dilithium */
+/*
+ * The outcome of each rejection test in the signing loop is public: the
+ * number of iterations is visible to anyone timing the signer, and the
+ * candidates that are rejected are never released. Declassifying the
+ * yes/no result -- and only that -- lets the loop branch on it while
+ * memcheck keeps checking that the tests themselves (chknorm, make_hint)
+ * do not branch on the secret values they inspect.
+ */
+static int mldsa_reject(int r)
+{
+    PQC_CT_DECLASSIFY(&r, sizeof r);
+    return r;
+}
+
 /* ================================================================= */
 
 pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
                              uint8_t *sig, size_t *siglen,
                              const uint8_t *msg, size_t msglen,
+                             const uint8_t *ctx, size_t ctxlen,
                              const uint8_t *sk)
 {
     unsigned int n;
@@ -181,6 +233,8 @@ pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
 
     if (!params || !sig || !siglen || !msg || !sk)
         return PQC_ERROR_INVALID_ARGUMENT;
+    if (ctxlen > PQC_MLDSA_MAX_CTX_BYTES || (ctxlen && !ctx))
+        return PQC_ERROR_INVALID_ARGUMENT;
 
     rho = seedbuf;
     tr = rho + PQC_MLDSA_SEEDBYTES;
@@ -190,12 +244,8 @@ pqc_status_t pqc_mldsa_sign(const pqc_mldsa_params_t *params,
 
     pqc_mldsa_unpack_sk(rho, tr, key, &t0, &s1, &s2, sk, params);
 
-    /* Compute mu = CRH(tr, msg) */
-    pqc_shake256_init(&state);
-    pqc_shake256_absorb(&state, tr, PQC_MLDSA_TRBYTES);
-    pqc_shake256_absorb(&state, msg, msglen);
-    pqc_shake256_finalize(&state);
-    pqc_shake256_squeeze(&state, mu, PQC_MLDSA_CRHBYTES);
+    /* mu = H(tr || M', 64), M' = 0x00 || |ctx| || ctx || M */
+    mldsa_compute_mu(mu, tr, ctx, ctxlen, msg, msglen);
 
     /* Compute rhoprime = CRH(key, rnd, mu)
      * Use hedged signing: rnd is random.  On RNG failure rnd would be
@@ -244,6 +294,15 @@ rej:
     pqc_shake256_finalize(&state);
     pqc_shake256_squeeze(&state, sig, params->ctilde_bytes);
 
+    /* c~ is the first component of the signature. For an iteration that is
+     * rejected it is a hash of mu and w1 alone, and w1 = HighBits(A*y)
+     * depends only on the fresh mask y, not on s1 or s2; the key enters
+     * only through z and r0, which are never released for a rejected
+     * iteration. SampleInBall (poly_challenge) rejection-samples on c~,
+     * as FIPS 204 Algorithm 29 specifies, so it is declassified here as
+     * mldsa-native and the reference implementation do. */
+    PQC_CT_DECLASSIFY(sig, params->ctilde_bytes);
+
     pqc_mldsa_poly_challenge(&cp, sig, params->ctilde_bytes, params->tau);
     pqc_mldsa_poly_ntt(&cp);
 
@@ -252,8 +311,8 @@ rej:
     pqc_mldsa_polyvecl_invntt(&z, params->l);
     pqc_mldsa_polyvecl_add(&z, &z, &y, params->l);
     pqc_mldsa_polyvecl_reduce(&z, params->l);
-    if (pqc_mldsa_polyvecl_chknorm(&z,
-            params->gamma1 - (int32_t)params->beta, params->l))
+    if (mldsa_reject(pqc_mldsa_polyvecl_chknorm(&z,
+            params->gamma1 - (int32_t)params->beta, params->l)))
         goto rej;
 
     /* Check that subtracting cs2 does not change high bits of w and
@@ -262,23 +321,28 @@ rej:
     pqc_mldsa_polyveck_invntt(&h, params->k);
     pqc_mldsa_polyveck_sub(&w0, &w0, &h, params->k);
     pqc_mldsa_polyveck_reduce(&w0, params->k);
-    if (pqc_mldsa_polyveck_chknorm(&w0,
-            params->gamma2 - (int32_t)params->beta, params->k))
+    if (mldsa_reject(pqc_mldsa_polyveck_chknorm(&w0,
+            params->gamma2 - (int32_t)params->beta, params->k)))
         goto rej;
 
     /* Compute hints for w1 */
     pqc_mldsa_polyveck_pointwise_poly(&h, &cp, &t0, params->k);
     pqc_mldsa_polyveck_invntt(&h, params->k);
     pqc_mldsa_polyveck_reduce(&h, params->k);
-    if (pqc_mldsa_polyveck_chknorm(&h,
-            (int32_t)params->gamma2, params->k))
+    if (mldsa_reject(pqc_mldsa_polyveck_chknorm(&h,
+            (int32_t)params->gamma2, params->k)))
         goto rej;
 
     pqc_mldsa_polyveck_add(&w0, &w0, &h, params->k);
     n = pqc_mldsa_polyveck_make_hint(&h, &w0, &w1,
                                       params->gamma2, params->k);
-    if (n > params->omega)
+    if (mldsa_reject(n > params->omega))
         goto rej;
+
+    /* Accepted: z and h are released as the signature, so they are public
+     * from here. Packing h branches on which coefficients are set. */
+    PQC_CT_DECLASSIFY(&z, sizeof z);
+    PQC_CT_DECLASSIFY(&h, sizeof h);
 
     /* Write signature: sig = (c_tilde || z || h) */
     pqc_mldsa_pack_sig(sig, sig, &z, &h, params);
@@ -301,6 +365,7 @@ rej:
 
 pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
                                const uint8_t *msg, size_t msglen,
+                               const uint8_t *ctx, size_t ctxlen,
                                const uint8_t *sig, size_t siglen,
                                const uint8_t *pk)
 {
@@ -317,6 +382,10 @@ pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
 
     if (!params || !msg || !sig || !pk)
         return PQC_ERROR_INVALID_ARGUMENT;
+    /* FIPS 204 Algorithm 3, step 1: a context longer than 255 bytes is
+     * not an error to report, it is a signature that does not verify. */
+    if (ctxlen > PQC_MLDSA_MAX_CTX_BYTES || (ctxlen && !ctx))
+        return PQC_ERROR_VERIFICATION_FAILED;
 
     if (siglen != params->sig_bytes)
         return PQC_ERROR_VERIFICATION_FAILED;
@@ -328,13 +397,12 @@ pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
             params->gamma1 - (int32_t)params->beta, params->l))
         return PQC_ERROR_VERIFICATION_FAILED;
 
-    /* Compute mu = CRH(H(rho, t1), msg) */
-    pqc_shake256(mu, PQC_MLDSA_TRBYTES, pk, params->pk_bytes);
-    pqc_shake256_init(&state);
-    pqc_shake256_absorb(&state, mu, PQC_MLDSA_TRBYTES);
-    pqc_shake256_absorb(&state, msg, msglen);
-    pqc_shake256_finalize(&state);
-    pqc_shake256_squeeze(&state, mu, PQC_MLDSA_CRHBYTES);
+    /* tr = H(pk, 64); mu = H(tr || M', 64) as in sign */
+    {
+        uint8_t tr[PQC_MLDSA_TRBYTES];
+        pqc_shake256(tr, PQC_MLDSA_TRBYTES, pk, params->pk_bytes);
+        mldsa_compute_mu(mu, tr, ctx, ctxlen, msg, msglen);
+    }
 
     /* Matrix-vector multiplication; compute Az - c*2^d*t1 */
     pqc_mldsa_poly_challenge(&cp, c, params->ctilde_bytes, params->tau);
@@ -378,6 +446,24 @@ pqc_status_t pqc_mldsa_verify(const pqc_mldsa_params_t *params,
 /*  Vtable wrappers for the unified signature API                      */
 /* ================================================================= */
 
+static pqc_status_t mldsa44_sign_ctx(uint8_t *sig, size_t *siglen,
+                                      const uint8_t *msg, size_t msglen,
+                                      const uint8_t *ctx, size_t ctxlen,
+                                      const uint8_t *sk)
+{
+    return pqc_mldsa_sign(&PQC_MLDSA_44, sig, siglen, msg, msglen,
+                          ctx, ctxlen, sk);
+}
+
+static pqc_status_t mldsa44_verify_ctx(const uint8_t *msg, size_t msglen,
+                                        const uint8_t *ctx, size_t ctxlen,
+                                        const uint8_t *sig, size_t siglen,
+                                        const uint8_t *pk)
+{
+    return pqc_mldsa_verify(&PQC_MLDSA_44, msg, msglen, ctx, ctxlen,
+                            sig, siglen, pk);
+}
+
 static pqc_status_t mldsa44_keygen(uint8_t *pk, uint8_t *sk)
 {
     return pqc_mldsa_keygen(&PQC_MLDSA_44, pk, sk);
@@ -387,14 +473,34 @@ static pqc_status_t mldsa44_sign(uint8_t *sig, size_t *siglen,
                                   const uint8_t *msg, size_t msglen,
                                   const uint8_t *sk)
 {
-    return pqc_mldsa_sign(&PQC_MLDSA_44, sig, siglen, msg, msglen, sk);
+    return pqc_mldsa_sign(&PQC_MLDSA_44, sig, siglen, msg, msglen,
+                          NULL, 0, sk);
 }
 
 static pqc_status_t mldsa44_verify(const uint8_t *msg, size_t msglen,
                                     const uint8_t *sig, size_t siglen,
                                     const uint8_t *pk)
 {
-    return pqc_mldsa_verify(&PQC_MLDSA_44, msg, msglen, sig, siglen, pk);
+    return pqc_mldsa_verify(&PQC_MLDSA_44, msg, msglen, NULL, 0,
+                            sig, siglen, pk);
+}
+
+static pqc_status_t mldsa65_sign_ctx(uint8_t *sig, size_t *siglen,
+                                      const uint8_t *msg, size_t msglen,
+                                      const uint8_t *ctx, size_t ctxlen,
+                                      const uint8_t *sk)
+{
+    return pqc_mldsa_sign(&PQC_MLDSA_65, sig, siglen, msg, msglen,
+                          ctx, ctxlen, sk);
+}
+
+static pqc_status_t mldsa65_verify_ctx(const uint8_t *msg, size_t msglen,
+                                        const uint8_t *ctx, size_t ctxlen,
+                                        const uint8_t *sig, size_t siglen,
+                                        const uint8_t *pk)
+{
+    return pqc_mldsa_verify(&PQC_MLDSA_65, msg, msglen, ctx, ctxlen,
+                            sig, siglen, pk);
 }
 
 static pqc_status_t mldsa65_keygen(uint8_t *pk, uint8_t *sk)
@@ -406,14 +512,34 @@ static pqc_status_t mldsa65_sign(uint8_t *sig, size_t *siglen,
                                   const uint8_t *msg, size_t msglen,
                                   const uint8_t *sk)
 {
-    return pqc_mldsa_sign(&PQC_MLDSA_65, sig, siglen, msg, msglen, sk);
+    return pqc_mldsa_sign(&PQC_MLDSA_65, sig, siglen, msg, msglen,
+                          NULL, 0, sk);
 }
 
 static pqc_status_t mldsa65_verify(const uint8_t *msg, size_t msglen,
                                     const uint8_t *sig, size_t siglen,
                                     const uint8_t *pk)
 {
-    return pqc_mldsa_verify(&PQC_MLDSA_65, msg, msglen, sig, siglen, pk);
+    return pqc_mldsa_verify(&PQC_MLDSA_65, msg, msglen, NULL, 0,
+                            sig, siglen, pk);
+}
+
+static pqc_status_t mldsa87_sign_ctx(uint8_t *sig, size_t *siglen,
+                                      const uint8_t *msg, size_t msglen,
+                                      const uint8_t *ctx, size_t ctxlen,
+                                      const uint8_t *sk)
+{
+    return pqc_mldsa_sign(&PQC_MLDSA_87, sig, siglen, msg, msglen,
+                          ctx, ctxlen, sk);
+}
+
+static pqc_status_t mldsa87_verify_ctx(const uint8_t *msg, size_t msglen,
+                                        const uint8_t *ctx, size_t ctxlen,
+                                        const uint8_t *sig, size_t siglen,
+                                        const uint8_t *pk)
+{
+    return pqc_mldsa_verify(&PQC_MLDSA_87, msg, msglen, ctx, ctxlen,
+                            sig, siglen, pk);
 }
 
 static pqc_status_t mldsa87_keygen(uint8_t *pk, uint8_t *sk)
@@ -425,14 +551,16 @@ static pqc_status_t mldsa87_sign(uint8_t *sig, size_t *siglen,
                                   const uint8_t *msg, size_t msglen,
                                   const uint8_t *sk)
 {
-    return pqc_mldsa_sign(&PQC_MLDSA_87, sig, siglen, msg, msglen, sk);
+    return pqc_mldsa_sign(&PQC_MLDSA_87, sig, siglen, msg, msglen,
+                          NULL, 0, sk);
 }
 
 static pqc_status_t mldsa87_verify(const uint8_t *msg, size_t msglen,
                                     const uint8_t *sig, size_t siglen,
                                     const uint8_t *pk)
 {
-    return pqc_mldsa_verify(&PQC_MLDSA_87, msg, msglen, sig, siglen, pk);
+    return pqc_mldsa_verify(&PQC_MLDSA_87, msg, msglen, NULL, 0,
+                            sig, siglen, pk);
 }
 
 /* ================================================================= */
@@ -452,6 +580,8 @@ static const pqc_sig_vtable_t mldsa_vtables[] = {
         .sign               = mldsa44_sign,
         .verify             = mldsa44_verify,
         .sign_stateful      = NULL,
+        .sign_ctx           = mldsa44_sign_ctx,
+        .verify_ctx         = mldsa44_verify_ctx,
     },
     {
         .algorithm_name     = "ML-DSA-65",
@@ -465,6 +595,8 @@ static const pqc_sig_vtable_t mldsa_vtables[] = {
         .sign               = mldsa65_sign,
         .verify             = mldsa65_verify,
         .sign_stateful      = NULL,
+        .sign_ctx           = mldsa65_sign_ctx,
+        .verify_ctx         = mldsa65_verify_ctx,
     },
     {
         .algorithm_name     = "ML-DSA-87",
@@ -478,6 +610,8 @@ static const pqc_sig_vtable_t mldsa_vtables[] = {
         .sign               = mldsa87_sign,
         .verify             = mldsa87_verify,
         .sign_stateful      = NULL,
+        .sign_ctx           = mldsa87_sign_ctx,
+        .verify_ctx         = mldsa87_verify_ctx,
     },
 };
 

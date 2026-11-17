@@ -25,6 +25,7 @@
 #include "core/kem/mlkem/poly.h"
 #include "core/kem/mlkem/ntt.h"
 #include "core/common/hash/sha3.h"
+#include "core/common/ct_check.h"
 
 /* XOF block size for SHAKE-128 */
 #define PQC_MLKEM_XOF_BLOCKBYTES  PQC_SHAKE128_RATE
@@ -210,6 +211,12 @@ void pqc_mlkem_gen_matrix(pqc_mlkem_polyvec *a,
     uint8_t extseed[PQC_MLKEM_SYMBYTES + 2];
     pqc_shake128_ctx state;
 
+    /* The seed is always rho, which is published as the last 32 bytes of
+     * the encapsulation key (FIPS 203 Algorithm 13, line 19). Rejection
+     * sampling on its expansion is therefore not secret-dependent, even
+     * when rho was just derived from the secret d in key generation or
+     * read back out of a decapsulation key. */
+    PQC_CT_DECLASSIFY(seed, PQC_MLKEM_SYMBYTES);
     memcpy(extseed, seed, PQC_MLKEM_SYMBYTES);
 
     for (i = 0; i < k; i++) {

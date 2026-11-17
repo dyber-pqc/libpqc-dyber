@@ -15,6 +15,7 @@
 #include "pqc/common.h"
 #include "pqc/rand.h"
 #include "field25519.h"
+#include "core/common/ct_check.h"
 
 /* X25519 key/shared-secret sizes */
 #define X25519_BYTES 32
@@ -137,7 +138,11 @@ int x25519_shared_secret(uint8_t ss[32], const uint8_t pk[32],
     for (int i = 0; i < 32; i++)
         zero_check |= ss[i];
 
-    if (zero_check == 0)
+    /* An all-zero result means pk was a low-order point, which is a
+     * property of the (public) peer key, not of sk. */
+    int is_zero = (zero_check == 0);
+    PQC_CT_DECLASSIFY(&is_zero, sizeof is_zero);
+    if (is_zero)
         return -1;
 
     return 0;

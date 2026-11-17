@@ -167,6 +167,55 @@ pqc_status_t pqc_sig_verify(const PQC_SIG *sig,
                                public_key);
 }
 
+/* FIPS 204 / FIPS 205: ctx is length-prefixed in a single byte. */
+#define PQC_SIG_MAX_CTX_BYTES 255
+
+pqc_status_t pqc_sig_sign_ctx(const PQC_SIG *sig,
+                               uint8_t *signature, size_t *signature_len,
+                               const uint8_t *message, size_t message_len,
+                               const uint8_t *context, size_t context_len,
+                               const uint8_t *secret_key) {
+    if (!sig || !signature || !signature_len || !message || !secret_key)
+        return PQC_ERROR_INVALID_ARGUMENT;
+    if (context_len > PQC_SIG_MAX_CTX_BYTES || (context_len && !context))
+        return PQC_ERROR_INVALID_ARGUMENT;
+    if (sig->vtable->sign_ctx)
+        return sig->vtable->sign_ctx(signature, signature_len,
+                                     message, message_len,
+                                     context, context_len, secret_key);
+    /* No context input: refuse a non-empty one instead of dropping it,
+     * which would let the caller believe it was bound into the signature. */
+    if (context_len)
+        return PQC_ERROR_NOT_SUPPORTED;
+    return pqc_sig_sign(sig, signature, signature_len,
+                        message, message_len, secret_key);
+}
+
+pqc_status_t pqc_sig_verify_ctx(const PQC_SIG *sig,
+                                 const uint8_t *message, size_t message_len,
+                                 const uint8_t *context, size_t context_len,
+                                 const uint8_t *signature, size_t signature_len,
+                                 const uint8_t *public_key) {
+    if (!sig || !message || !signature || !public_key)
+        return PQC_ERROR_INVALID_ARGUMENT;
+    if (context_len && !context)
+        return PQC_ERROR_INVALID_ARGUMENT;
+    if (context_len > PQC_SIG_MAX_CTX_BYTES)
+        return PQC_ERROR_VERIFICATION_FAILED;
+    if (sig->vtable->verify_ctx) {
+        if (signature_len == 0 ||
+            signature_len > sig->vtable->max_signature_size)
+            return PQC_ERROR_VERIFICATION_FAILED;
+        return sig->vtable->verify_ctx(message, message_len,
+                                       context, context_len,
+                                       signature, signature_len, public_key);
+    }
+    if (context_len)
+        return PQC_ERROR_NOT_SUPPORTED;
+    return pqc_sig_verify(sig, message, message_len,
+                          signature, signature_len, public_key);
+}
+
 pqc_status_t pqc_sig_sign_stateful(const PQC_SIG *sig,
                                     uint8_t *signature, size_t *signature_len,
                                     const uint8_t *message, size_t message_len,

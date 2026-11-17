@@ -12,10 +12,12 @@
  *
  * Group order n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
  *
- * Field and scalar multiplication, addition and subtraction are
- * branch-free. The point arithmetic is not: p256_point_scalar_mult() is
- * a plain double-and-add whose sequence of operations depends on the
- * scalar. See the note there.
+ * Field and scalar arithmetic is branch-free. p256_point_scalar_mult()
+ * runs a fixed sequence of complete additions (Renes, Costello and
+ * Batina, 2016) and selects with masks, so neither its control flow nor
+ * its memory accesses depend on the scalar. p256_point_add() and
+ * p256_point_double() still branch on special cases; they are used only
+ * on public points (ECDSA verification).
  */
 
 #include <string.h>
@@ -114,13 +116,19 @@ int p256_fe_is_zero(const p256_fe f)
     return (r == 0) ? 1 : 0;
 }
 
+static uint64_t sub256(p256_fe r, const p256_fe a, const p256_fe b);
+
+/*
+ * Returns 1, 0 or -1. Constant time: it is used on secret scalars (the
+ * range checks on private keys and ECDSA nonces), where an early exit
+ * would reveal the position of the first limb that differs from n.
+ */
 int p256_fe_cmp(const p256_fe f, const p256_fe g)
 {
-    for (int i = 3; i >= 0; i--) {
-        if (f[i] > g[i]) return 1;
-        if (f[i] < g[i]) return -1;
-    }
-    return 0;
+    p256_fe t;
+    uint64_t lt = sub256(t, f, g);      /* f < g */
+    uint64_t gt = sub256(t, g, f);      /* g < f */
+    return (int)gt - (int)lt;
 }
 
 void p256_fe_cmov(p256_fe f, const p256_fe g, uint64_t b)
@@ -696,28 +704,124 @@ void p256_point_add(p256_point *r, const p256_point *p, const p256_point *q)
 /* ------------------------------------------------------------------ */
 
 /*
- * NOTE: not constant time. The addition is skipped for zero bits of k,
- * and p256_point_add()/p256_point_double() branch on special cases, so
- * the running time depends on the scalar. k is a secret in ECDH and in
- * ECDSA signing. Hardening this (a fixed-window ladder with complete
- * formulas) is tracked separately; it does not affect the results.
+ * Constant-time scalar multiplication.
+ *
+ * Works in homogeneous projective coordinates (x = X/Z, y = Y/Z) with the
+ * complete addition formula for a = -3 of Renes, Costello and Batina,
+ * "Complete addition formulas for prime order elliptic curves"
+ * (EUROCRYPT 2016), Algorithm 4. "Complete" means the same formula is
+ * correct for every pair of inputs -- P + Q, P + P, P + O, O + O and
+ * P + (-P) -- so there are no special cases to branch on. Each of the 256
+ * steps computes both R = 2R and T = R + P and keeps one with a mask.
+ *
+ * Before 0.3.0 this was a double-and-add that skipped the addition for
+ * zero bits over Jacobian formulas with special-case branches, so its
+ * running time depended on the private key in ECDH and on the nonce in
+ * ECDSA signing.
  */
+
+/* b = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B */
+static const p256_fe P256_B = {
+    0x3BCE3C3E27D2604BULL,
+    0x651D06B0CC53B0F6ULL,
+    0xB3EBBD55769886BCULL,
+    0x5AC635D8AA3A93E7ULL,
+};
+
+typedef struct { p256_fe X, Y, Z; } p256_proj;
+
+/* r = p + q. r may alias p or q. */
+static void p256_proj_add(p256_proj *r, const p256_proj *p,
+                          const p256_proj *q)
+{
+    p256_fe t0, t1, t2, t3, t4, X3, Y3, Z3;
+
+    p256_fe_mul(t0, p->X, q->X);        /*  1 */
+    p256_fe_mul(t1, p->Y, q->Y);        /*  2 */
+    p256_fe_mul(t2, p->Z, q->Z);        /*  3 */
+    p256_fe_add(t3, p->X, p->Y);        /*  4 */
+    p256_fe_add(t4, q->X, q->Y);        /*  5 */
+    p256_fe_mul(t3, t3, t4);            /*  6 */
+    p256_fe_add(t4, t0, t1);            /*  7 */
+    p256_fe_sub(t3, t3, t4);            /*  8 */
+    p256_fe_add(t4, p->Y, p->Z);        /*  9 */
+    p256_fe_add(X3, q->Y, q->Z);        /* 10 */
+    p256_fe_mul(t4, t4, X3);            /* 11 */
+    p256_fe_add(X3, t1, t2);            /* 12 */
+    p256_fe_sub(t4, t4, X3);            /* 13 */
+    p256_fe_add(X3, p->X, p->Z);        /* 14 */
+    p256_fe_add(Y3, q->X, q->Z);        /* 15 */
+    p256_fe_mul(X3, X3, Y3);            /* 16 */
+    p256_fe_add(Y3, t0, t2);            /* 17 */
+    p256_fe_sub(Y3, X3, Y3);            /* 18 */
+    p256_fe_mul(Z3, P256_B, t2);        /* 19 */
+    p256_fe_sub(X3, Y3, Z3);            /* 20 */
+    p256_fe_add(Z3, X3, X3);            /* 21 */
+    p256_fe_add(X3, X3, Z3);            /* 22 */
+    p256_fe_sub(Z3, t1, X3);            /* 23 */
+    p256_fe_add(X3, t1, X3);            /* 24 */
+    p256_fe_mul(Y3, P256_B, Y3);        /* 25 */
+    p256_fe_add(t1, t2, t2);            /* 26 */
+    p256_fe_add(t2, t1, t2);            /* 27 */
+    p256_fe_sub(Y3, Y3, t2);            /* 28 */
+    p256_fe_sub(Y3, Y3, t0);            /* 29 */
+    p256_fe_add(t1, Y3, Y3);            /* 30 */
+    p256_fe_add(Y3, t1, Y3);            /* 31 */
+    p256_fe_add(t1, t0, t0);            /* 32 */
+    p256_fe_add(t0, t1, t0);            /* 33 */
+    p256_fe_sub(t0, t0, t2);            /* 34 */
+    p256_fe_mul(t1, t4, Y3);            /* 35 */
+    p256_fe_mul(t2, t0, Y3);            /* 36 */
+    p256_fe_mul(Y3, X3, Z3);            /* 37 */
+    p256_fe_add(Y3, Y3, t2);            /* 38 */
+    p256_fe_mul(X3, t3, X3);            /* 39 */
+    p256_fe_sub(X3, X3, t1);            /* 40 */
+    p256_fe_mul(Z3, t4, Z3);            /* 41 */
+    p256_fe_mul(t1, t3, t0);            /* 42 */
+    p256_fe_add(Z3, Z3, t1);            /* 43 */
+
+    p256_fe_copy(r->X, X3);
+    p256_fe_copy(r->Y, Y3);
+    p256_fe_copy(r->Z, Z3);
+}
+
 void p256_point_scalar_mult(p256_point *r, const uint8_t k[32],
                              const p256_point *p)
 {
-    p256_point acc, base = *p;      /* r may alias p */
+    p256_proj acc, sum, base;
+    p256_fe z2;
 
-    p256_point_zero(&acc);
+    /* Jacobian (X, Y, Z) -> projective (X*Z, Y, Z^3). The point at
+     * infinity (Z = 0) maps to (0, Y, 0), which is the projective
+     * identity. */
+    p256_fe_mul(base.X, p->X, p->Z);
+    p256_fe_copy(base.Y, p->Y);
+    p256_fe_sq(z2, p->Z);
+    p256_fe_mul(base.Z, z2, p->Z);
+
+    /* acc = O = (0 : 1 : 0) */
+    p256_fe_zero(acc.X);
+    p256_fe_one(acc.Y);
+    p256_fe_zero(acc.Z);
 
     for (int i = 0; i < 256; i++) {
-        p256_point_double(&acc, &acc);
+        uint64_t bit = (uint64_t)((k[i / 8] >> (7 - (i & 7))) & 1);
 
-        int bit = (k[i / 8] >> (7 - (i & 7))) & 1;
-        if (bit)
-            p256_point_add(&acc, &acc, &base);
+        p256_proj_add(&acc, &acc, &acc);
+        p256_proj_add(&sum, &acc, &base);
+        p256_fe_cmov(acc.X, sum.X, bit);
+        p256_fe_cmov(acc.Y, sum.Y, bit);
+        p256_fe_cmov(acc.Z, sum.Z, bit);
     }
 
-    *r = acc;
+    /* Projective (X : Y : Z) -> Jacobian (X*Z, Y*Z^2, Z). */
+    p256_fe_mul(r->X, acc.X, acc.Z);
+    p256_fe_sq(z2, acc.Z);
+    p256_fe_mul(r->Y, acc.Y, z2);
+    p256_fe_copy(r->Z, acc.Z);
+
+    pqc_memzero(&acc, sizeof acc);
+    pqc_memzero(&sum, sizeof sum);
 }
 
 void p256_point_scalar_mult_base(p256_point *r, const uint8_t k[32])

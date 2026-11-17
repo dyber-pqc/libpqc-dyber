@@ -18,9 +18,6 @@
 
 #define BIKE_SHARED_SECRET_BYTES  32
 #define BIKE_SEED_BYTES           32
-#define BIKE_MAX_DECODE_ITERS     100  /* Maximum bit-flipping iterations */
-#define BIKE_NB_ITER              5    /* BGF iterations per round */
-#define BIKE_TAU                  3    /* Threshold parameter for BGF */
 
 /* ------------------------------------------------------------------ */
 /* BIKE-L1 parameters (NIST Level 1)                                    */
@@ -34,7 +31,7 @@
 #define BIKE_L1_R_BYTES   ((BIKE_L1_R + 7) / 8)
 #define BIKE_L1_R_WORDS   ((BIKE_L1_R + 63) / 64)
 #define BIKE_L1_PK_BYTES  BIKE_L1_R_BYTES
-#define BIKE_L1_SK_BYTES  (BIKE_SEED_BYTES + 2 * BIKE_L1_R_BYTES + BIKE_SHARED_SECRET_BYTES)
+#define BIKE_L1_SK_BYTES  (2 * BIKE_L1_R_BYTES + BIKE_SHARED_SECRET_BYTES)  /* h0 || h1 || sigma */
 #define BIKE_L1_CT_BYTES  (BIKE_L1_R_BYTES + BIKE_SHARED_SECRET_BYTES)
 
 /* ------------------------------------------------------------------ */
@@ -49,7 +46,7 @@
 #define BIKE_L3_R_BYTES   ((BIKE_L3_R + 7) / 8)
 #define BIKE_L3_R_WORDS   ((BIKE_L3_R + 63) / 64)
 #define BIKE_L3_PK_BYTES  BIKE_L3_R_BYTES
-#define BIKE_L3_SK_BYTES  (BIKE_SEED_BYTES + 2 * BIKE_L3_R_BYTES + BIKE_SHARED_SECRET_BYTES)
+#define BIKE_L3_SK_BYTES  (2 * BIKE_L3_R_BYTES + BIKE_SHARED_SECRET_BYTES)  /* h0 || h1 || sigma */
 #define BIKE_L3_CT_BYTES  (BIKE_L3_R_BYTES + BIKE_SHARED_SECRET_BYTES)
 
 /* ------------------------------------------------------------------ */
@@ -64,7 +61,7 @@
 #define BIKE_L5_R_BYTES   ((BIKE_L5_R + 7) / 8)
 #define BIKE_L5_R_WORDS   ((BIKE_L5_R + 63) / 64)
 #define BIKE_L5_PK_BYTES  BIKE_L5_R_BYTES
-#define BIKE_L5_SK_BYTES  (BIKE_SEED_BYTES + 2 * BIKE_L5_R_BYTES + BIKE_SHARED_SECRET_BYTES)
+#define BIKE_L5_SK_BYTES  (2 * BIKE_L5_R_BYTES + BIKE_SHARED_SECRET_BYTES)  /* h0 || h1 || sigma */
 #define BIKE_L5_CT_BYTES  (BIKE_L5_R_BYTES + BIKE_SHARED_SECRET_BYTES)
 
 /* ------------------------------------------------------------------ */

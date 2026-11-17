@@ -139,18 +139,10 @@ void slhdsa_wots_gen_pk(uint8_t *pk,
     memset(prf_addr, 0, 32);
     slhdsa_copy_subtree_addr(prf_addr, addr);
     slhdsa_set_type(prf_addr, SLHDSA_ADDR_TYPE_WOTSPRF);
-    slhdsa_set_keypair_addr(prf_addr, 0);
-    /* Copy keypair from the original address */
-    {
-        uint8_t kp_addr[32];
-        memset(kp_addr, 0, 32);
-        slhdsa_copy_keypair_addr(kp_addr, addr);
-        slhdsa_set_keypair_addr(prf_addr,
-            ((uint32_t)kp_addr[16] << 24) | ((uint32_t)kp_addr[17] << 16) |
-            ((uint32_t)kp_addr[18] <<  8) | ((uint32_t)kp_addr[19]));
-    }
+    /* FIPS 205 Algorithms 6 and 7: skADRS keeps the key pair address. */
+    slhdsa_set_keypair_addr(prf_addr, slhdsa_get_keypair_addr(addr));
 
-    slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+    slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTS);
 
     for (i = 0; i < wots_len; i++) {
         /* Generate secret key element via PRF */
@@ -163,7 +155,7 @@ void slhdsa_wots_gen_pk(uint8_t *pk,
     }
 
     /* Compress all chain endpoints into single n-byte PK */
-    slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTSPK);
+    slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTSPK);
     slhdsa_thash(pk, tmp, wots_len, pub_seed, addr, p);
 }
 
@@ -196,16 +188,10 @@ void slhdsa_wots_sign(uint8_t *sig,
     memset(prf_addr, 0, 32);
     slhdsa_copy_subtree_addr(prf_addr, addr);
     slhdsa_set_type(prf_addr, SLHDSA_ADDR_TYPE_WOTSPRF);
-    {
-        uint8_t kp_addr[32];
-        memset(kp_addr, 0, 32);
-        slhdsa_copy_keypair_addr(kp_addr, addr);
-        slhdsa_set_keypair_addr(prf_addr,
-            ((uint32_t)kp_addr[16] << 24) | ((uint32_t)kp_addr[17] << 16) |
-            ((uint32_t)kp_addr[18] <<  8) | ((uint32_t)kp_addr[19]));
-    }
+    /* FIPS 205 Algorithms 6 and 7: skADRS keeps the key pair address. */
+    slhdsa_set_keypair_addr(prf_addr, slhdsa_get_keypair_addr(addr));
 
-    slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+    slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTS);
 
     for (i = 0; i < wots_len; i++) {
         slhdsa_set_chain_addr(prf_addr, i);
@@ -241,7 +227,7 @@ void slhdsa_wots_pk_from_sig(uint8_t *pk,
     base_w(msg_base_w, p->wots_len1, msg, w);
     wots_checksum(msg_base_w, p->wots_len1, p->wots_len2, w);
 
-    slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+    slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTS);
 
     for (i = 0; i < wots_len; i++) {
         slhdsa_set_chain_addr(addr, i);
@@ -251,6 +237,6 @@ void slhdsa_wots_pk_from_sig(uint8_t *pk,
     }
 
     /* Compress */
-    slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTSPK);
+    slhdsa_set_type_keep_keypair(addr, SLHDSA_ADDR_TYPE_WOTSPK);
     slhdsa_thash(pk, tmp, wots_len, pub_seed, addr, p);
 }

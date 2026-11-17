@@ -53,18 +53,28 @@ void ntru_poly_mul(ntru_poly_t *r, const ntru_poly_t *a,
 {
     int n = p->n;
     int mask = p->q - 1;
-    int32_t tmp[NTRU_MAX_N];
+    /*
+     * Accumulate in uint32_t. With q = 4096 and n = 821 a coefficient of
+     * the product can reach about 1.4e10, so an int32_t accumulator
+     * overflowed -- undefined behaviour, found by fuzzing decapsulation.
+     * Unsigned arithmetic wraps mod 2^32, and q is a power of two no
+     * larger than 2^16, so the result mod q is unchanged.
+     *
+     * There is no shortcut for zero coefficients of a: a is often a
+     * secret (f, or r), and skipping on it would be a secret-dependent
+     * branch.
+     */
+    uint32_t tmp[NTRU_MAX_N];
 
-    memset(tmp, 0, (size_t)n * sizeof(int32_t));
+    memset(tmp, 0, (size_t)n * sizeof(uint32_t));
 
     for (int i = 0; i < n; i++) {
-        if (a->coeffs[i] == 0)
-            continue;
         for (int j = 0; j < n; j++) {
             int idx = i + j;
             if (idx >= n)
                 idx -= n;
-            tmp[idx] += (int32_t)a->coeffs[i] * (int32_t)b->coeffs[j];
+            tmp[idx] += (uint32_t)(int32_t)a->coeffs[i] *
+                        (uint32_t)(int32_t)b->coeffs[j];
         }
     }
 
@@ -125,15 +135,16 @@ void ntru_poly_lift(ntru_poly_t *r, int n)
 static void poly_mul_mod_m(int16_t *r, const int16_t *a,
                            const int16_t *b, int n, int mod)
 {
-    int32_t tmp[NTRU_MAX_N];
-    memset(tmp, 0, (size_t)n * sizeof(int32_t));
+    /* Unsigned accumulator and no zero shortcut: see ntru_poly_mul().
+     * mod is always a power of two here. */
+    uint32_t tmp[NTRU_MAX_N];
+    memset(tmp, 0, (size_t)n * sizeof(uint32_t));
 
     for (int i = 0; i < n; i++) {
-        if (a[i] == 0) continue;
         for (int j = 0; j < n; j++) {
             int idx = i + j;
             if (idx >= n) idx -= n;
-            tmp[idx] += (int32_t)a[i] * (int32_t)b[j];
+            tmp[idx] += (uint32_t)(int32_t)a[i] * (uint32_t)(int32_t)b[j];
         }
     }
 

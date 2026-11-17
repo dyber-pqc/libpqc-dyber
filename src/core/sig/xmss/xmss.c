@@ -40,6 +40,7 @@
 #include "core/common/hash/sha2.h"
 #include "core/common/hash/sha3.h"
 #include "xmss.h"
+#include "core/common/ct_check.h"
 
 #define N PQC_XMSS_SHA2_N
 #define LEN PQC_XMSS_WOTS_LEN
@@ -336,6 +337,10 @@ static pqc_status_t xmss_sign_stateful_impl(uint8_t *sig, size_t *siglen,
         pqc_sha256_update(&ctx, msg, msglen);
         pqc_sha256_final(&ctx, msg_hash);
     }
+    /* R is written into the signature, the root is the public key and idx
+     * is in the signature, so msg_hash is a function of public values: the
+     * verifier computes the same one. WOTS+ branches on its digits. */
+    PQC_CT_DECLASSIFY(msg_hash, N);
 
     /* Build signature */
     pos = 0;

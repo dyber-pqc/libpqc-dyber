@@ -17,6 +17,7 @@
 #include "pqc/rand.h"
 #include "core/common/hash/sha2.h"
 #include "field_p256.h"
+#include "core/common/ct_check.h"
 #include "ecdh_p256.h"
 
 /* ------------------------------------------------------------------ */
@@ -33,16 +34,18 @@ int ecdh_p256_keygen(uint8_t pk[65], uint8_t sk[32])
         if (rc != PQC_OK)
             return (int)rc;
 
-        /* Check sk != 0 */
+        /* Reject sk == 0 and sk >= n. Whether a candidate is rejected is
+         * declassified -- a rejected candidate is discarded, and an
+         * accepted one is uniform in [1, n-1] whatever was rejected
+         * before it -- but the candidate itself is not. */
         uint8_t z = 0;
         for (int i = 0; i < 32; i++) z |= sk[i];
-        if (z == 0) continue;
-
-        /* Check sk < n */
-        p256_fe sk_fe, n_fe;
+        p256_fe sk_fe;
         p256_scalar_frombytes(sk_fe, sk);
-        p256_fe_copy(n_fe, P256_N);
-        if (p256_fe_cmp(sk_fe, n_fe) >= 0) continue;
+        int bad = (z == 0) | (p256_fe_cmp(sk_fe, P256_N) >= 0);
+        pqc_memzero(sk_fe, sizeof(sk_fe));
+        PQC_CT_DECLASSIFY(&bad, sizeof bad);
+        if (bad) continue;
 
         break;
     } while (1);
@@ -70,8 +73,11 @@ int ecdh_p256_shared_secret(uint8_t ss[32], const uint8_t pk[65],
     /* The private scalar must be in [1, n-1] */
     p256_fe sk_fe;
     p256_scalar_frombytes(sk_fe, sk);
-    int out_of_range = p256_fe_is_zero(sk_fe) || p256_fe_cmp(sk_fe, P256_N) >= 0;
+    int out_of_range = p256_fe_is_zero(sk_fe) | (p256_fe_cmp(sk_fe, P256_N) >= 0);
     pqc_memzero(sk_fe, sizeof(sk_fe));
+    /* A key that fails this check is rejected outright; only a malformed
+     * key fails it, so the outcome is public. */
+    PQC_CT_DECLASSIFY(&out_of_range, sizeof out_of_range);
     if (out_of_range)
         return -1;
 
@@ -79,8 +85,12 @@ int ecdh_p256_shared_secret(uint8_t ss[32], const uint8_t pk[65],
     p256_point S;
     p256_point_scalar_mult(&S, sk, &P);
 
-    /* Check for point at infinity */
-    if (p256_point_is_zero(&S))
+    /* Check for point at infinity. P-256 has prime order and P was
+     * validated as a curve point, so with sk in [1, n-1] this cannot
+     * happen; the outcome reveals nothing about sk. */
+    int at_infinity = p256_point_is_zero(&S);
+    PQC_CT_DECLASSIFY(&at_infinity, sizeof at_infinity);
+    if (at_infinity)
         return -1;
 
     /* Extract x-coordinate */

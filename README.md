@@ -75,7 +75,7 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 - **20 language bindings** — C, C++, C#, Go, Rust, Java, Python, JavaScript, TypeScript, PHP, Ruby, Swift, Kotlin, Scala, Dart, Perl, R, MATLAB, Shell CLI, ASM
 - **7+ operating systems** — Linux, macOS, Windows, FreeBSD, Fedora, RHEL, Unix
 - **Hardware acceleration** — AVX2, AVX-512, ARM NEON, SVE, SHA-NI, PCLMULQDQ, BMI2
-- **Production-grade security** — Constant-time implementations, secure memory zeroization, NIST KAT validation
+- **Checked security properties** — Constant-time execution verified with Valgrind (ctgrind) in CI for ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, LMS, XMSS and the hybrids; ML-DSA and SLH-DSA interoperability-tested against OpenSSL; key material zeroized (see [Security](#security) for what is and is not covered)
 - **Hybrid schemes** — Combine PQC with classical algorithms (X25519, Ed25519, NIST P-256)
 - **Stateful signatures** — LMS (RFC 8554) and XMSS (RFC 8391) with safe state management
 - **Zero external dependencies** — All primitives (SHA-2, SHA-3, SHAKE, Keccak, Curve25519, P-256) implemented in-library
@@ -171,9 +171,9 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 | HQC | HQC-128 | 1 | 2,249 B | 2,289 B | 4,481 B | 64 B |
 | HQC | HQC-192 | 3 | 4,522 B | 4,562 B | 9,026 B | 64 B |
 | HQC | HQC-256 | 5 | 7,245 B | 7,285 B | 14,469 B | 64 B |
-| BIKE | BIKE-L1 | 1 | 1,541 B | 3,749 B | 1,573 B | 32 B |
-| BIKE | BIKE-L3 | 3 | 3,083 B | 7,467 B | 3,115 B | 32 B |
-| BIKE | BIKE-L5 | 5 | 5,122 B | 12,371 B | 5,154 B | 32 B |
+| BIKE | BIKE-L1 | 1 | 1,541 B | 3,114 B | 1,573 B | 32 B |
+| BIKE | BIKE-L3 | 3 | 3,083 B | 6,198 B | 3,115 B | 32 B |
+| BIKE | BIKE-L5 | 5 | 5,122 B | 10,276 B | 5,154 B | 32 B |
 | Classic McEliece | 348864 | 1 | 261,120 B | 6,492 B | 128 B | 32 B |
 | Classic McEliece | 6688128 | 5 | 1,044,992 B | 13,932 B | 240 B | 32 B |
 | Classic McEliece | 8192128 | 5 | 1,357,824 B | 14,120 B | 240 B | 32 B |
@@ -789,15 +789,33 @@ typedef enum {
 
 ## Security
 
-### Constant-Time Guarantees
+### Constant-Time Execution
 
-All operations on secret data use the `pqc_ct_*` utility functions:
+The goal is no branch and no memory access that depends on secret data.
+It is checked, not assumed: `tests/ct/test_ct` runs each algorithm under
+Valgrind with every random byte marked secret, and reports any branch or
+memory address derived from one (the "ctgrind" technique). CI blocks on
+this for the algorithms in [`tests/ct/ct_gate.txt`](tests/ct/ct_gate.txt):
 
-- **No branches** on secret values
-- **No secret-dependent memory accesses** (no lookup tables indexed by secrets)
-- **Constant-time comparison** via XOR-folding
-- **Constant-time conditional move** via bitwise masking
-- **Compiler barrier** to prevent optimization of zeroization
+- ML-KEM, ML-DSA and SLH-DSA (all parameter sets)
+- the four hybrid schemes, including X25519, Ed25519 and P-256
+- BIKE and FrodoKEM
+- LMS-SHA256-H10 and XMSS-SHA2-10-256 (the larger LMS and XMSS sets
+  share the signing code but take too long under Valgrind for every
+  commit)
+
+**HQC is not constant time**, and the remaining families are not
+yet functionally correct, so a timing result for them would mean nothing.
+See the Known issues in [CHANGELOG.md](CHANGELOG.md).
+
+A clean ctgrind run covers the code paths it exercised, in the build it
+ran (gcc -O2, x86-64). It does not see variable-time CPU instructions,
+paths not taken, or what another compiler emits. Values the standards
+make public (public keys, signatures, the matrix seed) are marked public
+with `PQC_CT_DECLASSIFY()`, each with a comment saying why.
+
+Helpers in `src/core/common/ct_ops.h` provide constant-time comparison,
+selection and conditional move.
 
 ### Memory Safety
 
@@ -821,10 +839,37 @@ All operations on secret data use the `pqc_ct_*` utility functions:
 
 ### Validation
 
-- NIST Known Answer Test (KAT) vectors for all implemented algorithms
-- Constant-time verification with valgrind/ctgrind in CI
-- Fuzzing with AFL++ and libFuzzer for all algorithm entry points
-- AddressSanitizer and UndefinedBehaviorSanitizer in debug builds
+What CI checks today:
+
+- Interoperability of ML-DSA and SLH-DSA with OpenSSL 3.5, in both
+  directions, for every parameter set
+- ML-KEM against NIST's ACVP vectors for FIPS 203: key generation,
+  encapsulation, decapsulation (including implicit rejection) and the
+  required input checks, 240 tests (`tests/kat/`)
+- ML-DSA and SLH-DSA against NIST's ACVP vectors for FIPS 204 and 205:
+  key generation, deterministic and hedged signing, and verification
+  through the pure external interface with context strings (210 and 344
+  tests; SLH-DSA verification for the 128-bit parameter sets only, to
+  keep the repository small)
+- BIKE against all 300 official round 4 known-answer vectors
+  (`tests/kat/`)
+- Published test vectors for the hash layer (FIPS 180-4, FIPS 202,
+  RFC 4231) and the classical primitives in the hybrids (RFC 7748,
+  RFC 8032, RFC 6979, NIST CAVP)
+- Constant-time execution with ctgrind, as above
+- AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind memcheck
+  across the test suite, and MemorySanitizer on the suites fast enough
+  to finish under it
+- Fuzzing of signature verification and KEM decapsulation / encapsulation
+  for every algorithm with libFuzzer, under AddressSanitizer and
+  UndefinedBehaviorSanitizer (`tests/fuzz/`), 10 minutes per target per
+  run with a corpus kept between runs
+
+Not yet in place: known-answer vectors for the other post-quantum
+algorithms; HashML-DSA and HashSLH-DSA (pre-hash signing), which the
+library does not implement; and the internal and external-mu interfaces,
+which it does not expose. ACVP vectors for those exist and are counted,
+unconverted, in the vector files' headers.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
@@ -1004,16 +1049,15 @@ Both implement post-quantum algorithms, but libpqc-dyber:
 | **Hybrid (belt-and-suspenders)** | ML-KEM-768+X25519 | ML-DSA-65+Ed25519 |
 | **Long-term archival signing** | — | LMS-SHA256-H10 (stateful) ³ |
 
-¹ ML-DSA currently signs the message directly rather than applying the
-FIPS 204 §5.2 domain-separation prefix (`0x00 || len(ctx) || ctx || M`). The
-arithmetic is correct, but signatures are not interoperable with conformant
-implementations and there is no context parameter. Fixed in 0.3.0, which
-changes signature bytes.
+¹ As of 0.3.0, ML-DSA and SLH-DSA apply the FIPS 204 / FIPS 205 message
+prefix and take an optional context string (`pqc_sig_sign_ctx`). Signatures
+from 0.2.x do not verify under 0.3.0, and SLH-DSA keys must be regenerated;
+see CHANGELOG.md.
 
-² SLH-DSA has two FIPS 205 conformance defects (the FORS keypair address is
-cleared before use, and `H_msg` emits one byte too few in 8 of 12 parameter
-sets). It signs and verifies, but with reduced multi-target margin and
-without interoperability. Fixed in 0.3.0.
+² SLH-DSA had several FIPS 205 conformance defects before 0.3.0, including
+the FORS key-pair address being cleared before use, which reduced its
+multi-target margin. All twelve parameter sets now pass NIST's ACVP
+vectors and interoperate with OpenSSL.
 
 ³ H20 and H25 cannot generate keys: signing rebuilds the whole 2^h-leaf tree,
 and there is no room in the secret key for cached traversal state.
@@ -1023,12 +1067,14 @@ FN-DSA key generation fails and MAYO and SNOVA signatures do not verify.
 
 ### Is this production-ready?
 
-ML-KEM (FIPS 203) is: it interoperates in both directions with an
-independent ACVP-validated implementation, including the implicit-rejection
-path. ML-DSA's arithmetic is correct and interoperates once the §5.2 prefix
-is applied (see ¹). The hash layer and the classical hybrid primitives are
-checked against published vectors. Known-answer vectors for the
-post-quantum algorithms are not yet in the repository.
+As of 0.3.0, CI checks ML-KEM (FIPS 203), ML-DSA (FIPS 204) and SLH-DSA
+(FIPS 205) against NIST's ACVP test vectors, and ML-DSA and SLH-DSA
+against OpenSSL 3.5 in both directions; BIKE reproduces its official
+round 4 known-answer tests. The hash layer and the classical hybrid
+primitives are checked against published vectors, and these algorithms
+are checked for constant-time execution (see Security). Passing NIST's
+test vectors is not the same as a CAVP or CMVP certificate: the library
+has not been through formal validation.
 
 The remaining algorithms are incomplete; see "Known issues" in CHANGELOG.md
 for the specific list.

@@ -33,6 +33,20 @@ typedef struct {
     pqc_status_t (*sign_stateful)(uint8_t *sig, size_t *siglen,
                                   const uint8_t *msg, size_t msglen,
                                   uint8_t *sk);
+    /*
+     * Context-string variants (FIPS 204 / FIPS 205 "ctx"). NULL for schemes
+     * that have no context input; the dispatcher then accepts only an empty
+     * context. Schemes that set these must make sign/verify equivalent to
+     * calling them with an empty context.
+     */
+    pqc_status_t (*sign_ctx)(uint8_t *sig, size_t *siglen,
+                             const uint8_t *msg, size_t msglen,
+                             const uint8_t *ctx, size_t ctxlen,
+                             const uint8_t *sk);
+    pqc_status_t (*verify_ctx)(const uint8_t *msg, size_t msglen,
+                               const uint8_t *ctx, size_t ctxlen,
+                               const uint8_t *sig, size_t siglen,
+                               const uint8_t *pk);
 } pqc_sig_vtable_t;
 
 struct pqc_sig_s {

@@ -16,6 +16,7 @@
 #include "core/sig/mldsa/rounding.h"
 #include "core/sig/mldsa/mldsa_params.h"
 #include "core/common/hash/sha3.h"
+#include "core/common/ct_check.h"
 
 /* ------------------------------------------------------------------ */
 /* Basic arithmetic                                                     */
@@ -143,22 +144,24 @@ int pqc_mldsa_poly_chknorm(const pqc_mldsa_poly *a, int32_t bound)
 {
     unsigned int i;
     int32_t t;
+    uint32_t r = 0;
 
     if (bound > (PQC_MLDSA_Q - 1) / 8)
         return 1;
 
-    /* It is ok to leak which coefficient violates the bound since
-       the probability for each coefficient is independent of secret
-       data but we must not leak the sign of the centralized representative. */
+    /* Constant time over the coefficients. The reference implementation
+     * returns at the first coefficient over the bound and argues that this
+     * is harmless; checking every coefficient costs little and leaves the
+     * accept/reject result as the only thing the caller can branch on. */
     for (i = 0; i < PQC_MLDSA_N; ++i) {
-        /* Absolute value */
+        /* Absolute value, without branching on the sign */
         t = a->coeffs[i] >> 31;
         t = a->coeffs[i] - (t & 2 * a->coeffs[i]);
 
-        if (t >= bound)
-            return 1;
+        /* t >= bound  <=>  bound - 1 - t < 0 */
+        r |= (uint32_t)(bound - 1 - t) >> 31;
     }
-    return 0;
+    return (int)r;
 }
 
 /* ------------------------------------------------------------------ */
@@ -244,19 +247,30 @@ static unsigned int rej_eta(int32_t *a,
         t0 = buf[pos] & 0x0F;
         t1 = buf[pos++] >> 4;
 
+        /* Whether a nibble is accepted is declassified; its value, once
+         * accepted, is not. Acceptance (t < 15, or t < 9) is independent of
+         * the value of an accepted coefficient, so the pattern of
+         * rejections says nothing about s1 or s2. This is the argument
+         * mldsa-native makes for the same function. */
         if (eta == 2) {
-            if (t0 < 15) {
+            uint32_t ok0 = t0 < 15, ok1 = t1 < 15;
+            PQC_CT_DECLASSIFY(&ok0, sizeof ok0);
+            PQC_CT_DECLASSIFY(&ok1, sizeof ok1);
+            if (ok0) {
                 t0 = t0 - (205 * t0 >> 10) * 5;
                 a[ctr++] = 2 - (int32_t)t0;
             }
-            if (t1 < 15 && ctr < len) {
+            if (ok1 && ctr < len) {
                 t1 = t1 - (205 * t1 >> 10) * 5;
                 a[ctr++] = 2 - (int32_t)t1;
             }
         } else { /* eta == 4 */
-            if (t0 < 9)
+            uint32_t ok0 = t0 < 9, ok1 = t1 < 9;
+            PQC_CT_DECLASSIFY(&ok0, sizeof ok0);
+            PQC_CT_DECLASSIFY(&ok1, sizeof ok1);
+            if (ok0)
                 a[ctr++] = 4 - (int32_t)t0;
-            if (t1 < 9 && ctr < len)
+            if (ok1 && ctr < len)
                 a[ctr++] = 4 - (int32_t)t1;
         }
     }
