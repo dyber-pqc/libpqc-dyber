@@ -60,6 +60,17 @@ if(PQC_ENABLE_KEM_BIKE)
     set_tests_properties(test_kat_bike PROPERTIES TIMEOUT 1800 LABELS kat)
 endif()
 
+# HQC against the official HQC v5.1.0 KATs (see tests/kat/test_kat_hqc.c).
+if(PQC_ENABLE_KEM_HQC)
+    add_executable(test_kat_hqc kat/test_kat_hqc.c kat/nist_drbg.c)
+    target_link_libraries(test_kat_hqc PRIVATE pqc_static)
+    target_include_directories(test_kat_hqc PRIVATE
+        ${PQC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    add_test(NAME test_kat_hqc COMMAND test_kat_hqc)
+    set_tests_properties(test_kat_hqc PROPERTIES TIMEOUT 1800 LABELS kat)
+endif()
+
 # ML-KEM against NIST's ACVP vectors (see tests/kat/test_kat_mlkem.c).
 if(PQC_ENABLE_KEM_MLKEM)
     add_executable(test_kat_mlkem kat/test_kat_mlkem.c)

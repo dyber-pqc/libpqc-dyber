@@ -91,12 +91,12 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 | Algorithm | Standard | Security Levels | Mathematical Basis | Status |
 |-----------|----------|----------------|--------------------|--------|
 | **ML-KEM** | FIPS 203 | 1, 3, 5 | Module-LWE | NIST Standardized (Aug 2024) |
-| **HQC** | NIST Round 4 | 1, 3, 5 | Hamming Quasi-Cyclic codes | Candidate (expected ~2027) |
+| **HQC** | HQC v5.1 (FIPS 207 pending) | 1, 3, 5 | Hamming Quasi-Cyclic codes | Selected by NIST (Mar 2025) |
 | **BIKE** | — | 1, 3, 5 | QC-MDPC codes | Research |
-| **Classic McEliece** | — | 1, 3, 5 | Binary Goppa codes | Research |
+| **Classic McEliece** | — | 1, 3, 5 | Binary Goppa codes | Experimental: does not work yet, hidden by default |
 | **FrodoKEM** | — | 1, 3, 5 | Unstructured LWE | Research |
-| **NTRU** | — | 1, 3, 5 | NTRU lattices | Research |
-| **NTRU-Prime** | — | 1, 3, 5 | Streamlined NTRU Prime | Research |
+| **NTRU** | — | 1, 3, 5 | NTRU lattices | Experimental: does not work yet, hidden by default |
+| **NTRU-Prime** | — | 1, 3, 5 | Streamlined NTRU Prime | Experimental: does not work yet, hidden by default |
 
 ### Digital Signature Schemes
 
@@ -104,14 +104,20 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 |-----------|----------|----------------|--------------------|--------|
 | **ML-DSA** | FIPS 204 | 2, 3, 5 | Module-LWE | NIST Standardized (Aug 2024) |
 | **SLH-DSA** | FIPS 205 | 1, 3, 5 | Hash functions (stateless) | NIST Standardized (Aug 2024) |
-| **FN-DSA (Falcon)** | FIPS 206 (draft) | 1, 5 | NTRU lattices (hash-then-sign) | NIST Draft (~2027) |
+| **FN-DSA (Falcon)** | FIPS 206 (draft) | 1, 5 | NTRU lattices (hash-then-sign) | NIST Draft (~2027). Experimental: does not work yet, hidden by default |
 | **SPHINCS+** | — | 1, 3, 5 | Hash functions | Predecessor to SLH-DSA |
-| **MAYO** | NIST Round 2 | 1, 2, 3, 5 | Multivariate quadratic (Oil & Vinegar) | Candidate |
-| **UOV** | NIST Round 2 | 1, 3, 5 | Unbalanced Oil & Vinegar | Candidate |
-| **SNOVA** | NIST Round 2 | 1, 3, 5 | Non-commutative ring UOV | Candidate |
-| **CROSS** | NIST Round 2 | 1, 3, 5 | Restricted Syndrome Decoding | Candidate |
+| **MAYO** | NIST Round 2 | 1, 2, 3, 5 | Multivariate quadratic (Oil & Vinegar) | Candidate. Experimental: does not work yet, hidden by default |
+| **UOV** | NIST Round 2 | 1, 3, 5 | Unbalanced Oil & Vinegar | Candidate. Experimental: does not work yet, hidden by default |
+| **SNOVA** | NIST Round 2 | 1, 3, 5 | Non-commutative ring UOV | Candidate. Experimental: does not work yet, hidden by default |
+| **CROSS** | NIST Round 2 | 1, 3, 5 | Restricted Syndrome Decoding | Candidate. Experimental: does not work yet, hidden by default |
 | **LMS** | RFC 8554 | — | Hash-based (stateful) | Standardized |
 | **XMSS** | RFC 8391 | — | Hash-based (stateful) | Standardized |
+
+Algorithms marked experimental are built but known not to work (see
+Known issues in [CHANGELOG.md](CHANGELOG.md)). `pqc_kem_new()` and
+`pqc_sig_new()` return NULL for them, and the algorithm lists leave them
+out, unless the caller opts in with `pqc_set_experimental(1)` or
+`PQC_ENABLE_EXPERIMENTAL=1`. Never do that in production.
 
 ### Hybrid Schemes
 
@@ -168,9 +174,9 @@ This library is **not a fork** of any existing project. Every algorithm is imple
 
 | Algorithm | Variant | NIST Level | Public Key | Secret Key | Ciphertext | Shared Secret |
 |-----------|---------|-----------|-----------|-----------|-----------|--------------|
-| HQC | HQC-128 | 1 | 2,249 B | 2,289 B | 4,481 B | 64 B |
-| HQC | HQC-192 | 3 | 4,522 B | 4,562 B | 9,026 B | 64 B |
-| HQC | HQC-256 | 5 | 7,245 B | 7,285 B | 14,469 B | 64 B |
+| HQC | HQC-128 | 1 | 2,241 B | 32 B | 4,433 B | 32 B |
+| HQC | HQC-192 | 3 | 4,514 B | 32 B | 8,978 B | 32 B |
+| HQC | HQC-256 | 5 | 7,237 B | 32 B | 14,421 B | 32 B |
 | BIKE | BIKE-L1 | 1 | 1,541 B | 3,114 B | 1,573 B | 32 B |
 | BIKE | BIKE-L3 | 3 | 3,083 B | 6,198 B | 3,115 B | 32 B |
 | BIKE | BIKE-L5 | 5 | 5,122 B | 10,276 B | 5,154 B | 32 B |
@@ -799,14 +805,15 @@ this for the algorithms in [`tests/ct/ct_gate.txt`](tests/ct/ct_gate.txt):
 
 - ML-KEM, ML-DSA and SLH-DSA (all parameter sets)
 - the four hybrid schemes, including X25519, Ed25519 and P-256
-- BIKE and FrodoKEM
+- BIKE, HQC and FrodoKEM
 - LMS-SHA256-H10 and XMSS-SHA2-10-256 (the larger LMS and XMSS sets
   share the signing code but take too long under Valgrind for every
   commit)
 
-**HQC is not constant time**, and the remaining families are not
-yet functionally correct, so a timing result for them would mean nothing.
-See the Known issues in [CHANGELOG.md](CHANGELOG.md).
+The remaining families are not yet functionally correct, so a timing
+result for them would mean nothing; they are hidden unless the caller
+opts in with `pqc_set_experimental(1)`. See the Known issues in
+[CHANGELOG.md](CHANGELOG.md).
 
 A clean ctgrind run covers the code paths it exercised, in the build it
 ran (gcc -O2, x86-64). It does not see variable-time CPU instructions,
@@ -886,7 +893,7 @@ The library detects CPU features at runtime and dispatches to optimized code pat
 | **AVX2** | x86_64 | NTT, polynomial arithmetic, Keccak |
 | **AVX-512** | x86_64 | Parallel Keccak, wide polynomial ops |
 | **SHA-NI** | x86_64 | SHA-256 hardware acceleration |
-| **PCLMULQDQ** | x86_64 | GF(2)[x] multiplication (BIKE, HQC) |
+| **PCLMULQDQ** | x86_64 | Detected only; no code path uses it yet |
 | **BMI2** | x86_64 | Field arithmetic (Curve25519) |
 | **NEON** | AArch64 | NTT, polynomial arithmetic, Keccak |
 | **SVE** | AArch64 | Scalable vector Keccak |

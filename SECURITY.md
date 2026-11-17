@@ -52,19 +52,20 @@ What CI verifies:
 - ML-DSA and SLH-DSA against NIST's ACVP vectors for FIPS 204 and 205
   (key generation, deterministic and hedged signing, verification;
   210 and 344 tests, through the pure external interface)
-- BIKE against all 300 official round 4 known-answer vectors, by
-  regenerating NIST's response files with its DRBG (`tests/kat/`)
+- BIKE against all 300 official round 4 known-answer vectors, and HQC
+  against all 300 official v5.1 vectors, by regenerating the response
+  files with NIST's DRBG (`tests/kat/`)
 - Round-trip tests, and a regression suite asserting the specific invariant
   behind each previously reported defect
 - Zero-warning builds, reproducible builds, and static analysis
 
 Design intent that CI does **not** yet verify:
 
-- Constant-time execution of HQC, which the ctgrind run shows it does
-  not have, and of the algorithm families that are not yet functionally
-  correct.
+- Constant-time execution of the algorithm families that are not yet
+  functionally correct. They are hidden unless the caller opts in with
+  `pqc_set_experimental(1)`.
 - Known-answer vectors for the post-quantum algorithms other than ML-KEM,
-  ML-DSA, SLH-DSA and BIKE.
+  ML-DSA, SLH-DSA, BIKE and HQC.
 - HashML-DSA / HashSLH-DSA (pre-hash signing), which is not implemented,
   and the internal and external-mu signing interfaces, which are not
   exposed, so their ACVP vectors cannot be run.
