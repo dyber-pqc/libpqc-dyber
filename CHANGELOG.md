@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A container image on GitHub Packages, `ghcr.io/dyber-pqc/libpqc-dyber`
+  (linux/amd64 and linux/arm64), with the shared and static libraries,
+  headers and `pqc-cli` under `/usr/local`. The release workflow publishes
+  it for each release tag, tagged with the version and `latest`; it can
+  also be run by hand for an existing tag.
+
 ## [0.3.1] - 2026-11-17
 
 This is a security release. HQC is replaced by the HQC v5.1 reference

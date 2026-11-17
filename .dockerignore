@@ -1,0 +1,7 @@
+.git
+build
+build-*
+*.obj
+bindings/*/target
+bindings/*/node_modules
+bindings/*/dist

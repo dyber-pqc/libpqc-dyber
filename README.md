@@ -221,6 +221,24 @@ ctest --test-dir build
 sudo cmake --install build
 ```
 
+### Prebuilt binaries and container image
+
+Each [release](https://github.com/dyber-pqc/libpqc-dyber/releases) has
+prebuilt archives for Linux (x86_64, arm64), macOS (x86_64, arm64) and
+Windows (x86_64). The library is also published to GitHub Packages as a
+container image (linux/amd64 and linux/arm64) with the shared and static
+libraries, the headers and `pqc-cli` installed under `/usr/local`:
+
+```bash
+docker run --rm ghcr.io/dyber-pqc/libpqc-dyber:latest pqc-cli algorithms
+```
+
+To build against it, copy the installed tree into your own image:
+
+```dockerfile
+COPY --from=ghcr.io/dyber-pqc/libpqc-dyber:latest /usr/local/ /usr/local/
+```
+
 ---
 
 ## Building from Source
