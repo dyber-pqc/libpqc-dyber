@@ -3,336 +3,343 @@
  * Copyright (c) 2024-2026 Dyber, Inc.
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
- * BIKE - Bit-flipping decoder (Black-Gray-Flip variant).
+ * BIKE - Black-Gray-Flip (BGF) decoder, constant time.
  *
- * Implements the BGF (Black-Gray-Flip) iterative decoder for QC-MDPC
- * codes. The decoder computes syndromes, calculates thresholds, and
- * iteratively flips error bits based on the number of unsatisfied
- * parity checks.
+ * This is the BGF decoder of the BIKE specification (round 4, v5.1,
+ * Algorithm 3), with its parameters: NbIter = 5, tau = 3, the linear
+ * threshold function below, and the two masked iterations after the
+ * first. It replaces an ad-hoc bit-flipping decoder that ran up to 100
+ * iterations with approximate thresholds, cost O(r^2) per iteration,
+ * stopped as soon as the syndrome was zero, and indexed memory by the
+ * secret key. A malformed ciphertext kept it busy for 20 s (L1) to
+ * 150 s (L5) in a release build.
+ *
+ * Constant time. The secret inputs are h0, h1 (the private key) and
+ * everything derived from them -- the syndrome, the error vector, the
+ * counters. Nothing below branches on them or uses them as an address:
+ *
+ *   - The positions of the w/2 set bits of h0 and h1 are extracted with
+ *     a scan of every bit for every slot (extract_positions).
+ *   - A counter for every bit position j, upc[j] = sum over k in supp(h)
+ *     of s[(j + k) mod r], is computed by rotating the whole syndrome by
+ *     each secret k with a masked barrel shift (rotr_ct) and adding the
+ *     result into bit-sliced counters (add_bits).
+ *   - Comparisons of all counters with a threshold are bit-sliced too
+ *     (ge_threshold), producing a mask of positions to flip.
+ *   - The syndrome weight, the threshold derived from it and the final
+ *     "is the residual zero" test use arithmetic only.
+ *   - The number of iterations is fixed. There is no early exit when the
+ *     residual reaches zero, so a valid and a malformed ciphertext take
+ *     the same time.
+ *
+ * The total cost is a fixed number of rotations of r-bit vectors:
+ * 7 counter computations and 8 residual computations, each w rotations.
  */
 
 #include <string.h>
 #include <stdlib.h>
+
+#include "pqc/common.h"
 #include "bike.h"
 #include "bike_params.h"
 
-/* ------------------------------------------------------------------ */
-/* Utility functions                                                    */
-/* ------------------------------------------------------------------ */
-
-static inline int bit_get(const uint64_t *v, uint32_t i)
-{
-    return (int)((v[i / 64] >> (i % 64)) & 1);
-}
-
-static inline void bit_flip(uint64_t *v, uint32_t i)
-{
-    v[i / 64] ^= (uint64_t)1 << (i % 64);
-}
-
-static uint32_t popcount_vec(const uint64_t *v, uint32_t words)
-{
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < words; i++) {
-        uint64_t x = v[i];
-        while (x) { x &= x - 1; count++; }
-    }
-    return count;
-}
+#define BGF_NB_ITER   5
+#define BGF_TAU       3
+#define UPC_SLICES    8      /* counters hold up to w/2 <= 137 < 256 */
 
 /* ------------------------------------------------------------------ */
-/* Syndrome computation                                                 */
+/* Threshold function                                                   */
 /*                                                                      */
-/* syndrome = c0 * h0_inv + c1 (in the parity check interpretation)    */
-/* For BIKE: syndrome = c0 + c1 * h_0 where h = h1 * h0^{-1}          */
+/* threshold(S) = max(floor(c0 + c1 * S), (d + 1) / 2), from the BIKE   */
+/* specification and its reference implementation, in fixed point with */
+/* 8 decimal places so that no floating point is involved:             */
 /*                                                                      */
-/* In the decoding context, we compute:                                 */
-/*   s = e0 * h0 + e1 * h1 mod (x^r - 1)                             */
-/* which is the same as multiplying the error by the parity check.      */
+/*   L1  d =  71   c0 = 13.530    c1 = 0.0069722    min = 36           */
+/*   L3  d = 103   c0 = 15.2588   c1 = 0.005265     min = 52           */
+/*   L5  d = 137   c0 = 17.8785   c1 = 0.00402312   min = 69           */
 /* ------------------------------------------------------------------ */
 
-void bike_compute_syndrome(uint64_t *syndrome,
-                           const uint64_t *c0, const uint64_t *c1,
-                           const uint64_t *h0,
-                           const bike_params_t *params)
+static uint32_t threshold(uint32_t S, uint32_t d)
 {
-    uint32_t r = params->r;
-    uint32_t r_words = params->r_words;
-    uint64_t *tmp = (uint64_t *)calloc(r_words, sizeof(uint64_t));
-    if (!tmp) {
-        memset(syndrome, 0, r_words * sizeof(uint64_t));
-        return;
+    uint64_t c0, c1;
+    uint32_t t, tmin = (d + 1) / 2, lt;
+
+    switch (d) {                      /* d is public */
+    case 71:  c0 = 1353000000ULL; c1 = 697220ULL; break;
+    case 103: c0 = 1525880000ULL; c1 = 526500ULL; break;
+    default:  c0 = 1787850000ULL; c1 = 402312ULL; break;   /* 137 */
     }
+    /* Division by a constant compiles to a multiply, not a divide. */
+    t = (uint32_t)((c0 + c1 * (uint64_t)S) / 100000000ULL);
+    lt = (uint32_t)(((uint64_t)t - tmin) >> 63);          /* t < tmin */
+    return t ^ ((t ^ tmin) & (0u - lt));
+}
 
-    /* syndrome = c0 + c1 * h0 mod (x^r - 1) */
-    bike_gf2x_mul(tmp, c1, h0, r);
-    bike_gf2x_add(syndrome, c0, tmp, r_words);
+/* ------------------------------------------------------------------ */
+/* Bit-vector helpers                                                   */
+/* ------------------------------------------------------------------ */
 
-    /* Clear trailing bits */
+static uint64_t popcount64(uint64_t x)
+{
+    x = x - ((x >> 1) & 0x5555555555555555ULL);
+    x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);
+    x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
+    return (x * 0x0101010101010101ULL) >> 56;
+}
+
+static uint32_t weight(const uint64_t *v, uint32_t words)
+{
+    uint64_t w = 0;
+    uint32_t i;
+    for (i = 0; i < words; i++)
+        w += popcount64(v[i]);
+    return (uint32_t)w;
+}
+
+static void mask_tail(uint64_t *v, uint32_t r)
+{
     uint32_t rem = r % 64;
-    if (rem) {
-        syndrome[r_words - 1] &= ((uint64_t)1 << rem) - 1;
-    }
-
-    free(tmp);
+    if (rem)
+        v[(r + 63) / 64 - 1] &= ((uint64_t)1 << rem) - 1;
 }
 
-/* ------------------------------------------------------------------ */
-/* Count unsatisfied parity checks for a given position                 */
-/*                                                                      */
-/* For position j in block b, count how many syndrome bits are set      */
-/* at positions where h_b has a 1-bit (cyclically shifted).             */
-/* This counts the number of unsatisfied parity checks involving bit j. */
-/* ------------------------------------------------------------------ */
-
-static uint32_t count_unsat(const uint64_t *syndrome,
-                            const uint64_t *h,
-                            uint32_t pos, uint32_t r)
+/*
+ * t = v || v as a bit string of 2r bits (bit i of t is v[i mod r]), in
+ * tw = 2 * r_words + 1 words. r is public, so the shifts are too.
+ */
+static void duplicate(uint64_t *t, const uint64_t *v, uint32_t r,
+                      uint32_t r_words, uint32_t tw)
 {
-    /*
-     * For the quasi-cyclic code, the parity checks involving position pos
-     * are determined by the nonzero positions of h, rotated by pos.
-     * unsat(pos) = |{ k : h[k]=1 and s[(pos+k) mod r]=1 }|
-     */
-    uint32_t count = 0;
-    for (uint32_t k = 0; k < r; k++) {
-        if (bit_get(h, k)) {
-            uint32_t idx = (pos + k) % r;
-            if (bit_get(syndrome, idx)) {
-                count++;
-            }
-        }
+    uint32_t q = r / 64, b = r % 64, i;
+
+    memset(t, 0, tw * sizeof(uint64_t));
+    memcpy(t, v, r_words * sizeof(uint64_t));
+    for (i = 0; i < r_words; i++) {
+        t[q + i] |= b ? v[i] << b : v[i];
+        if (b)
+            t[q + i + 1] |= v[i] >> (64 - b);
     }
-    return count;
 }
 
-/* ------------------------------------------------------------------ */
-/* BGF threshold computation                                            */
-/*                                                                      */
-/* threshold = floor(syndrome_weight / (2 * w/2)) + constant            */
-/* The constant depends on the iteration and security level.            */
-/* ------------------------------------------------------------------ */
-
-static uint32_t compute_threshold(uint32_t syndrome_weight,
-                                  uint32_t half_w,
-                                  int iteration,
-                                  uint32_t r)
+/*
+ * out = the r bits of t starting at bit k, i.e. out[j] = v[(j + k) mod r]
+ * when t = duplicate(v) and k <= r. k is secret: the word part of the
+ * shift is a barrel shifter whose stages are selected by mask, and the
+ * bit part is a variable shift, which runs in constant time.
+ * buf is scratch of tw words.
+ */
+static void rotr_ct(uint64_t *out, uint64_t *buf, const uint64_t *t,
+                    uint32_t k, uint32_t r, uint32_t r_words, uint32_t tw)
 {
-    /*
-     * BGF threshold computation from the BIKE NIST submission reference.
-     *
-     * The threshold is a linear function of the syndrome weight S:
-     *   T = max(floor(a + b * S), ceil((d+1)/2))
-     *
-     * The constants a and b depend on the half-weight d = w/2.
-     * From the BIKE reference implementation:
-     *   L1 (d=71):  a = 13.530, b = 0.0069722
-     *   L3 (d=103): a = 25.8086, b = 0.00488845
-     *   L5 (d=137): a = 30.1212, b = 0.00511085
-     *
-     * We use a general approximation:
-     *   b ≈ d / (10000)  (roughly fits all three levels)
-     *   a ≈ d / 5
-     *
-     * More precisely, using fixed-point arithmetic:
-     *   T = floor(a + b * S)
-     * where a and b are chosen per d value.
-     */
-    if (half_w == 0 || r == 0) return 1;
+    uint32_t q = k >> 6, b = k & 63, s, j;
 
-    /* Minimum threshold: ceil((d + 1) / 2) */
-    uint32_t T_min = (half_w + 2) / 2;
-
-    /*
-     * Use fixed-point: multiply b by 10000 to avoid floating point.
-     * b_fp = round(b * 10000)
-     * a_fp = round(a * 100)
-     * T = floor( a_fp/100 + b_fp * S / 10000 )
-     */
-    /*
-     * The UPC for error bits is approximately d*(1 - S/r) and for non-error
-     * bits approximately d*S/r. The threshold should be above the non-error
-     * UPC but not so high that no error bits are caught.
-     *
-     * We use: T_base = d * (1 - S/r) * factor, where factor decreases
-     * over iterations to catch progressively more bits.
-     *
-     * Equivalently: T = d * (r - S) * factor / r
-     *
-     * For iteration 0, factor ≈ 0.9 to be conservative.
-     * For later iterations, the syndrome weight decreases, making
-     * error bits easier to identify.
-     */
-    /*
-     * The expected UPC for an error bit is approximately d*(r-S)/r,
-     * and for a non-error bit approximately d*S/r. Set the threshold
-     * slightly above the error-bit mean so that only the highest-UPC
-     * (most confident) error bits are flipped in each iteration.
-     *
-     * factor > 1.0 means conservative (fewer false positives).
-     * A factor of ~1.1 works well: it catches only error bits in the
-     * upper tail of the UPC distribution, ensuring convergence.
-     */
-    uint32_t T;
-    /* d_err = d * (r - S) / r, the expected UPC for error bits */
-    uint32_t d_err = (uint32_t)(((uint64_t)half_w * (r - syndrome_weight)) / r);
-
-    switch (iteration) {
-    case 0:
-        /* T ≈ 1.1 * d_err = d_err + d_err/10 */
-        T = d_err + (d_err + 5) / 10;
-        break;
-    case 1:
-        /* T ≈ 1.0 * d_err */
-        T = d_err;
-        break;
-    default:
-        /* T ≈ 0.9 * d_err (more aggressive as syndrome shrinks) */
-        T = d_err - (d_err + 5) / 10;
-        break;
+    memcpy(buf, t, tw * sizeof(uint64_t));
+    for (s = 1; s <= r_words; s <<= 1) {
+        uint64_t m = 0 - (uint64_t)((q & s) != 0);
+        for (j = 0; j + s < tw; j++)
+            buf[j] = (buf[j] & ~m) | (buf[j + s] & m);
     }
-    if (T < T_min) T = T_min;
-
-    return T;
+    for (j = 0; j < r_words; j++)
+        out[j] = (buf[j] >> b) | ((buf[j + 1] << (63 - b)) << 1);
+    mask_tail(out, r);
 }
 
-/* ------------------------------------------------------------------ */
-/* Update syndrome after flipping bit j in block b                      */
-/*                                                                      */
-/* Flipping e_b[j] changes syndrome by XOR h_b rotated by j.           */
-/* s' = s + h_b * x^j mod (x^r - 1)                                   */
-/* ------------------------------------------------------------------ */
-
-static void update_syndrome(uint64_t *syndrome, const uint64_t *h,
-                            uint32_t pos, uint32_t r)
+/* Bit-sliced counters: ctr += v (one bit per position). */
+static void add_bits(uint64_t (*ctr)[BIKE_MAX_R_WORDS], const uint64_t *v,
+                     uint32_t r_words)
 {
-    for (uint32_t k = 0; k < r; k++) {
-        if (bit_get(h, k)) {
-            uint32_t idx = (pos + k) % r;
-            bit_flip(syndrome, idx);
+    uint32_t i, b;
+    for (i = 0; i < r_words; i++) {
+        uint64_t carry = v[i];
+        for (b = 0; b < UPC_SLICES; b++) {
+            uint64_t c = ctr[b][i] & carry;
+            ctr[b][i] ^= carry;
+            carry = c;
         }
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* BGF decoder main loop                                                */
-/* ------------------------------------------------------------------ */
-
-int bike_decode(uint64_t *e0, uint64_t *e1,
-                const uint64_t *syndrome_in,
-                const uint64_t *h0, const uint64_t *h1,
-                const bike_params_t *params)
+/* out[j] = 1 where ctr[j] >= T. */
+static void ge_threshold(uint64_t *out, uint64_t (*ctr)[BIKE_MAX_R_WORDS],
+                         uint32_t T, uint32_t r_words)
 {
-    uint32_t r = params->r;
-    uint32_t r_words = params->r_words;
-    (void)params->t; /* t used implicitly via threshold */
+    uint32_t i;
+    int b;
+    for (i = 0; i < r_words; i++) {
+        uint64_t gt = 0, eq = ~(uint64_t)0;
+        for (b = UPC_SLICES - 1; b >= 0; b--) {
+            uint64_t tb = 0 - (uint64_t)((T >> b) & 1);
+            uint64_t u = ctr[b][i];
+            gt |= eq & u & ~tb;
+            eq &= ~(u ^ tb);
+        }
+        out[i] = gt | eq;
+    }
+}
 
-    /* Working copy of syndrome */
-    uint64_t *syndrome = (uint64_t *)calloc(r_words, sizeof(uint64_t));
-    /* Black and gray masks */
-    uint8_t *black0 = (uint8_t *)calloc(r, 1);
-    uint8_t *black1 = (uint8_t *)calloc(r, 1);
-    uint8_t *gray0  = (uint8_t *)calloc(r, 1);
-    uint8_t *gray1  = (uint8_t *)calloc(r, 1);
+/*
+ * pos[0..d-1] = the indices of the set bits of h, which has exactly d.
+ * Every bit is visited for every slot, so neither the control flow nor
+ * any address depends on where the bits are.
+ */
+static void extract_positions(uint32_t *pos, const uint64_t *h,
+                              uint32_t d, uint32_t r)
+{
+    uint32_t i, k, count = 0;
 
-    if (!syndrome || !black0 || !black1 || !gray0 || !gray1) {
-        free(syndrome); free(black0); free(black1);
-        free(gray0); free(gray1);
+    memset(pos, 0, d * sizeof(uint32_t));
+    for (i = 0; i < r; i++) {
+        uint32_t bit = (uint32_t)(h[i / 64] >> (i % 64)) & 1;
+        for (k = 0; k < d; k++) {
+            uint32_t diff = count ^ k;
+            /* hit = 0xFFFFFFFF if bit == 1 and count == k */
+            uint32_t eq = (uint32_t)(((uint64_t)diff - 1) >> 63);
+            uint32_t hit = 0u - (bit & eq);
+            pos[k] |= i & hit;
+        }
+        count += bit;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Decoder state                                                        */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    uint32_t r, r_words, tw, d;
+    uint32_t pos[2][BIKE_MAX_W / 2];
+    uint64_t s[BIKE_MAX_R_WORDS];              /* syndrome c0 * h0      */
+    uint64_t res[BIKE_MAX_R_WORDS];            /* s + e H^T             */
+    uint64_t e[2][BIKE_MAX_R_WORDS];
+    uint64_t black[2][BIKE_MAX_R_WORDS];
+    uint64_t gray[2][BIKE_MAX_R_WORDS];
+    uint64_t flip[BIKE_MAX_R_WORDS];
+    uint64_t rot[BIKE_MAX_R_WORDS];
+    uint64_t ctr[UPC_SLICES][BIKE_MAX_R_WORDS];
+    uint64_t t[2 * BIKE_MAX_R_WORDS + 1];
+    uint64_t buf[2 * BIKE_MAX_R_WORDS + 1];
+} bgf_t;
+
+/* acc ^= v * h_b, for sparse secret h_b: (v * h)[i] = sum_k v[i - k]. */
+static void sparse_mul_acc(bgf_t *st, uint64_t *acc, const uint64_t *v,
+                           int b)
+{
+    uint32_t k, i;
+    duplicate(st->t, v, st->r, st->r_words, st->tw);
+    for (k = 0; k < st->d; k++) {
+        /* v[i - p] = v[(i + (r - p)) mod r]; r - p is in [1, r]. */
+        rotr_ct(st->rot, st->buf, st->t, st->r - st->pos[b][k],
+                st->r, st->r_words, st->tw);
+        for (i = 0; i < st->r_words; i++)
+            acc[i] ^= st->rot[i];
+    }
+}
+
+/* res = s + e0 * h0 + e1 * h1 */
+static void residual(bgf_t *st)
+{
+    memcpy(st->res, st->s, st->r_words * sizeof(uint64_t));
+    sparse_mul_acc(st, st->res, st->e[0], 0);
+    sparse_mul_acc(st, st->res, st->e[1], 1);
+}
+
+/* ctr = unsatisfied parity checks of every position of block b. */
+static void count_upc(bgf_t *st, int b)
+{
+    uint32_t k;
+    memset(st->ctr, 0, sizeof st->ctr);
+    duplicate(st->t, st->res, st->r, st->r_words, st->tw);
+    for (k = 0; k < st->d; k++) {
+        rotr_ct(st->rot, st->buf, st->t, st->pos[b][k],
+                st->r, st->r_words, st->tw);
+        add_bits(st->ctr, st->rot, st->r_words);
+    }
+}
+
+/* BFIter: flip where upc >= T; record black (flipped) and gray. */
+static void bf_iter(bgf_t *st, uint32_t T)
+{
+    int b;
+    uint32_t i;
+    /* Every block's counters come from the same residual. */
+    for (b = 0; b < 2; b++) {
+        count_upc(st, b);
+        ge_threshold(st->black[b], st->ctr, T, st->r_words);
+        ge_threshold(st->gray[b], st->ctr, T - BGF_TAU, st->r_words);
+        for (i = 0; i < st->r_words; i++)
+            st->gray[b][i] &= ~st->black[b][i];
+    }
+    for (b = 0; b < 2; b++)
+        for (i = 0; i < st->r_words; i++)
+            st->e[b][i] ^= st->black[b][i];
+}
+
+/* BFMaskedIter: flip where upc >= T and the mask is set. */
+static void bf_masked_iter(bgf_t *st, uint64_t (*mask)[BIKE_MAX_R_WORDS],
+                           uint32_t T)
+{
+    int b;
+    uint32_t i;
+    uint64_t f[2][BIKE_MAX_R_WORDS];
+    for (b = 0; b < 2; b++) {
+        count_upc(st, b);
+        ge_threshold(f[b], st->ctr, T, st->r_words);
+    }
+    for (b = 0; b < 2; b++)
+        for (i = 0; i < st->r_words; i++)
+            st->e[b][i] ^= f[b][i] & mask[b][i];
+}
+
+/* ------------------------------------------------------------------ */
+/* Public entry point                                                   */
+/* ------------------------------------------------------------------ */
+
+int bike_decode_ct(uint64_t *e0, uint64_t *e1,
+                   const uint64_t *c0,
+                   const uint64_t *h0, const uint64_t *h1,
+                   const bike_params_t *params)
+{
+    bgf_t *st = (bgf_t *)calloc(1, sizeof(bgf_t));
+    uint32_t it, i, T, tmask;
+    uint64_t nz = 0;
+    int ok;
+
+    if (!st)
         return -1;
-    }
+    st->r = params->r;
+    st->r_words = params->r_words;
+    st->tw = 2 * params->r_words + 1;
+    st->d = params->half_w;
+    tmask = (st->d + 1) / 2 + 1;     /* threshold of the masked iterations */
 
-    memcpy(syndrome, syndrome_in, r_words * sizeof(uint64_t));
-    memset(e0, 0, r_words * sizeof(uint64_t));
-    memset(e1, 0, r_words * sizeof(uint64_t));
+    extract_positions(st->pos[0], h0, st->d, st->r);
+    extract_positions(st->pos[1], h1, st->d, st->r);
 
-    int max_iters = BIKE_MAX_DECODE_ITERS;
+    /* Syndrome s = c0 * h0. c0 is public, h0 secret. */
+    memset(st->s, 0, sizeof st->s);
+    sparse_mul_acc(st, st->s, c0, 0);
 
-    for (int iter = 0; iter < max_iters; iter++) {
-        uint32_t sw = popcount_vec(syndrome, r_words);
-        if (sw == 0) {
-            /* Decoding succeeded */
-            free(syndrome); free(black0); free(black1);
-            free(gray0); free(gray1);
-            return 0;
-        }
-
-        uint32_t threshold = compute_threshold(sw, params->half_w, iter, r);
-
-        memset(black0, 0, r);
-        memset(black1, 0, r);
-        memset(gray0, 0, r);
-        memset(gray1, 0, r);
-
-        /* Step 1: Identify black and gray bits for block 0 (h0) */
-        for (uint32_t j = 0; j < r; j++) {
-            uint32_t upc = count_unsat(syndrome, h0, j, r);
-            if (upc >= threshold) {
-                black0[j] = 1;
-            } else if (upc >= threshold - 1 && threshold > 1) {
-                gray0[j] = 1;
-            }
-        }
-
-        /* Step 1b: Identify black and gray bits for block 1 (h1) */
-        for (uint32_t j = 0; j < r; j++) {
-            uint32_t upc = count_unsat(syndrome, h1, j, r);
-            if (upc >= threshold) {
-                black1[j] = 1;
-            } else if (upc >= threshold - 1 && threshold > 1) {
-                gray1[j] = 1;
-            }
-        }
-
-        /* Step 2: Flip black bits and update syndrome */
-        int flipped = 0;
-        for (uint32_t j = 0; j < r; j++) {
-            if (black0[j]) {
-                bit_flip(e0, j);
-                update_syndrome(syndrome, h0, j, r);
-                flipped = 1;
-            }
-        }
-        for (uint32_t j = 0; j < r; j++) {
-            if (black1[j]) {
-                bit_flip(e1, j);
-                update_syndrome(syndrome, h1, j, r);
-                flipped = 1;
-            }
-        }
-
-        /* Step 3: Flip gray bits that still have high UPC */
-        for (uint32_t j = 0; j < r; j++) {
-            if (gray0[j]) {
-                uint32_t upc = count_unsat(syndrome, h0, j, r);
-                if (upc >= threshold) {
-                    bit_flip(e0, j);
-                    update_syndrome(syndrome, h0, j, r);
-                    flipped = 1;
-                }
-            }
-        }
-        for (uint32_t j = 0; j < r; j++) {
-            if (gray1[j]) {
-                uint32_t upc = count_unsat(syndrome, h1, j, r);
-                if (upc >= threshold) {
-                    bit_flip(e1, j);
-                    update_syndrome(syndrome, h1, j, r);
-                    flipped = 1;
-                }
-            }
-        }
-
-        if (!flipped) {
-            /* No progress, decoding failed */
-            break;
+    for (it = 0; it < BGF_NB_ITER; it++) {
+        residual(st);
+        T = threshold(weight(st->res, st->r_words), st->d);
+        bf_iter(st, T);
+        if (it == 0) {
+            residual(st);
+            bf_masked_iter(st, st->black, tmask);
+            residual(st);
+            bf_masked_iter(st, st->gray, tmask);
         }
     }
 
-    /* Check final syndrome */
-    uint32_t final_sw = popcount_vec(syndrome, r_words);
-    int result = (final_sw == 0) ? 0 : -1;
+    /* Success iff e H^T = s, i.e. the residual is zero. */
+    residual(st);
+    for (i = 0; i < st->r_words; i++)
+        nz |= st->res[i];
+    ok = (int)(((nz | (0 - nz)) >> 63) ^ 1);     /* 1 if nz == 0 */
 
-    free(syndrome); free(black0); free(black1);
-    free(gray0); free(gray1);
-    return result;
+    memcpy(e0, st->e[0], st->r_words * sizeof(uint64_t));
+    memcpy(e1, st->e[1], st->r_words * sizeof(uint64_t));
+    pqc_memzero(st, sizeof(bgf_t));
+    free(st);
+    return ok;
 }

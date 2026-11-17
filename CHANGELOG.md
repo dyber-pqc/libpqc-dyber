@@ -5,6 +5,356 @@ All notable changes to libpqc-dyber will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-16
+
+This is a security and conformance release.
+
+- **ML-DSA and SLH-DSA now implement FIPS 204 and FIPS 205.** Before
+  this release neither interoperated with any other implementation:
+  signatures verified under libpqc-dyber, because signing and
+  verification shared the same deviations, and nowhere else. Both now
+  pass NIST's ACVP vectors and are checked against OpenSSL 3.5 in both
+  directions, with and without a context string.
+- **BIKE now implements the round 4 specification** and reproduces all
+  300 official known-answer vectors. Before, it was a different KEM on
+  the same code, and a malformed ciphertext could hold a core for
+  minutes.
+- **ML-KEM now performs the FIPS 203 input checks** it skipped, and
+  passes NIST's ACVP vectors.
+- **Constant-time execution is now verified**, by a Valgrind ("ctgrind")
+  check that blocks CI for ML-KEM, ML-DSA, SLH-DSA, BIKE, FrodoKEM, the
+  hybrids, LMS and XMSS. Fixing what it found closed a decryption-failure
+  timing oracle in FrodoKEM and in BIKE, made P-256 scalar multiplication
+  constant time, and removed secret-dependent branches from ML-DSA
+  signing.
+- **Fuzz targets** for signature verification and KEM decapsulation now
+  run in CI; the first run found undefined behaviour in NTRU.
+
+**This release changes signature bytes, SLH-DSA public keys, and
+everything BIKE produces.**
+
+- ML-DSA keys are unchanged. Signatures made by 0.2.x do not verify under
+  0.3.0, and the reverse.
+- SLH-DSA keys must be regenerated: `PK.root` is a function of the
+  address layout, which changed. Signatures do not carry over either.
+- `ML-DSA-65+Ed25519` and `ML-DSA-87+P256` signatures change with their
+  ML-DSA half.
+- The `SPHINCS+-*` names share the SLH-DSA core, so their keys and
+  signatures change too. They sign without the FIPS 205 message prefix
+  and take no context string. Their conformance to SPHINCS+ round 3 is
+  not tested; use the `SLH-DSA-*` names.
+- BIKE keys, ciphertexts and shared secrets all change, and the secret
+  key is now h0 || h1 || sigma as in the specification: 3114, 6198 and
+  10276 bytes at L1, L3 and L5, 32 bytes shorter than before. BIKE keys
+  must be regenerated.
+- ML-KEM keys and outputs are unchanged, but encapsulation to a key that
+  fails the FIPS 203 modulus check, and decapsulation with a key that
+  fails the hash check, now return `PQC_ERROR_INVALID_KEY`. The ML-KEM
+  hybrids inherit this.
+
+Reported by Conner (Spartan8806). Testing his findings against OpenSSL
+turned up the SLH-DSA address-layout and SHA-2 defects below, which a
+round-trip test could not see; the rest came from the verification work
+that followed (constant-time checking, fuzzing, and known-answer tests).
+
+### Security
+
+- **ML-DSA signed the message without the FIPS 204 section 5.2 prefix.**
+  `mu` was computed as `H(tr || M)`, which is ML-DSA.Sign_internal on the
+  raw message. ML-DSA.Sign hashes `M' = 0x00 || len(ctx) || ctx || M`.
+  The leading `0x00` separates pure ML-DSA from HashML-DSA, and the
+  context string is how an application stops a signature made for one
+  purpose being accepted for another. Without the prefix there was
+  neither, and no conformant verifier accepted the signatures. The
+  lattice arithmetic was correct.
+- **SLH-DSA signed the message without the FIPS 205 section 10.2
+  prefix**: the same omission, in `slh_sign` / `slh_verify`.
+- **SLH-DSA cleared the FORS and WOTS+ key-pair address.**
+  `slhdsa_set_type()` is a correct setTypeAndClear, but FIPS 205
+  Algorithms 6, 7, 8, 14, 15 and 17 restore the key-pair address right
+  after it, and this code did not. Every FORS instance depended on
+  `idx_tree` alone and was the same across all 2^h' leaves of a layer-0
+  tree, so distinct FORS few-time key pairs fell from 2^h to 2^(h-h'):
+  512 times more reuse for 128s and 192s, and 8 times for 128f and 192f.
+  The same defect class as the XMSS leaf index fixed in 0.2.0.
+- **SLH-DSA `H_msg` produced one byte too few** in 8 of the 12 parameter
+  sets. It emitted `ceil((k*a + h) / 8)` bytes, while the digest split
+  reads `m = ceil(k*a/8) + ceil((h-h/d)/8) + ceil((h/d)/8)`. The missing
+  byte, zeroed by the caller, was the top of `idx_leaf`: 128f and 256f
+  signed with layer-0 leaf 0 only, and 128s and 192s reached 2 of 512
+  leaves.
+- **SLH-DSA used its own ADRS layout.** FIPS 205 section 4.2 gives the
+  tree address 12 bytes. This code gave it 8, which put type, key pair,
+  chain and hash four bytes early and left the last word always zero.
+  Every tweakable hash input in all twelve parameter sets differed from
+  the standard.
+- **SLH-DSA-SHA2 did not compress the address.** FIPS 205 section 11.2
+  hashes the 22-byte ADRSc; this code hashed the full 32-byte ADRS. A
+  comment described this as a simplification.
+- **SLH-DSA-SHA2 at security categories 3 and 5 computed F with
+  SHA-512.** Section 11.2.2 moves only H and T_l to SHA-512; F and PRF
+  stay on SHA-256.
+- **SLH-DSA-SHA2 `H_msg` seeded MGF1 with the inner hash alone.** The
+  standard seeds it with `R || PK.seed || SHA-x(R || PK.seed || PK.root
+  || M)`.
+
+The entries below were found by the new constant-time check (see Added).
+None of them changes any output.
+
+- **FrodoKEM decapsulation branched on whether the ciphertext was
+  valid.** After the re-encryption check, which itself was constant time,
+  it chose between `k'` and the rejection seed `s` with an `if`, under a
+  comment saying it must not branch. Anyone able to submit modified
+  ciphertexts and time the result could tell which ones decrypted
+  correctly: the decryption-failure oracle that implicit rejection exists
+  to remove. It now selects with a mask and hashes once. Packing the
+  re-encrypted ciphertext and decoding the decrypted message also
+  branched on each bit; both are now branch-free.
+- **P-256 scalar multiplication was not constant time** (listed as a
+  known issue in 0.2.1). It skipped the addition for zero bits of the
+  scalar, over formulas with special-case branches, and the scalar is the
+  private key in ECDH and the nonce in ECDSA signing. It is now a fixed
+  sequence of 256 doublings and additions using the complete formulas of
+  Renes, Costello and Batina (2016), with the result selected by mask.
+  `p256_fe_cmp`, used for the range checks on private scalars and nonces,
+  returned at the first differing limb; it is now branch-free too.
+- **ML-DSA signing branched on secret coefficients** in two places: the
+  norm checks on `z`, `r0` and `ct0` returned at the first coefficient
+  over the bound, and `MakeHint` compared with branches. Both are now
+  branch-free, so the only thing the signing loop reveals is whether an
+  attempt was rejected, which its running time reveals anyway.
+
+Found by NIST's ACVP vectors for ML-KEM (see Added):
+
+- **ML-KEM did not perform the input checks FIPS 203 requires.**
+  Encapsulation did not apply the modulus check of section 7.2, so an
+  encapsulation key with a coefficient of q or more was used as if it
+  were reduced; decapsulation did not apply the hash check of section
+  7.3, so a decapsulation key whose embedded encapsulation key and stored
+  H(ek) disagreed was used anyway. Both now fail with
+  `PQC_ERROR_INVALID_KEY`. ACVP has 20 key-check vectors per parameter
+  set, 10 of them invalid keys; all 30 invalid keys were accepted. Valid keys
+  and all outputs are unchanged; the decapsulation check is constant time
+  and ctgrind stays clean. The hybrid KEMs inherit both checks.
+
+Found by the new fuzz targets (see Added):
+
+- **NTRU polynomial multiplication overflowed a signed integer.** Both
+  multiplication routines summed products in an `int32_t`; with q = 4096
+  and n = 821 a coefficient reaches about 1.4 x 10^10. That is undefined
+  behaviour, and decapsulating a malformed NTRU-HPS-4096-821 or
+  NTRU-HRSS-701 ciphertext triggered it immediately. They now accumulate
+  in `uint32_t`, which wraps, and since every modulus is a power of two
+  of at most 2^16 the result is unchanged. Both also skipped zero
+  coefficients of the first operand, often a secret; that branch is gone.
+  NTRU still does not round-trip (Known issues).
+- **BIKE decapsulation could be made to run for minutes, and leaked
+  through its timing.** The decoder was an ad-hoc bit-flipping loop of up
+  to 100 iterations with approximate thresholds, quadratic in the block
+  length r per iteration, that stopped as soon as the syndrome cleared.
+  In a release build (gcc -O2, x86-64) it took about 1, 3 and 5 s for a
+  valid ciphertext at L1, L3 and L5, and 22, 60 and 148 s for a random
+  one, so anyone able to send a ciphertext could occupy a core for
+  minutes. Its running time also depended on the secret key and on
+  whether decoding succeeded, and it read the syndrome at addresses
+  derived from the secret key.
+
+  It is replaced by the Black-Gray-Flip decoder of the BIKE
+  specification (Algorithm 3: five iterations, tau = 3, the specified
+  threshold function, and the two masked iterations), implemented in
+  constant time: the secret key positions are extracted by a full scan,
+  counters for every position come from rotating the whole syndrome by
+  each secret position with a masked barrel shift into bit-sliced
+  counters, and the iteration count is fixed. 1,000 round trips per level
+  decoded correctly and every modified ciphertext was rejected.
+
+  Decapsulation also chose between the real and the rejection secret
+  with an `if` on a validity bit computed with `&&` -- the same oracle as
+  FrodoKEM above -- and `bike_gf2x_mul` skipped zero bits of its second
+  operand, the secret h0 when computing the syndrome, and reduced with a
+  branch per bit. Both are now constant time.
+- **BIKE was not the BIKE KEM.** The code in `src/core/kem/bike` sampled
+  the error vector directly, sent H(e) as the second ciphertext component,
+  keyed on e, and stored an extra seed in the secret key; the
+  specification samples a message m, derives e = H(m), sends m XOR L(e),
+  and keys on m. Hashes and samplers differed too. Nothing it produced
+  interoperated with BIKE. It now follows Table 3 of the round 4
+  specification (v5.1): Algorithm 3 (WSHAKE256-PRF) for keys and errors,
+  L and K as SHA3-384, implicit rejection to K(sigma, c), and the
+  specified key and ciphertext encodings, and it reproduces all 300
+  official known-answer vectors byte for byte (see Added).
+
+  Key generation and encapsulation are now constant time as well. Key
+  generation inverted h0 with a variable-time extended Euclid; it now
+  uses Fermat's little theorem with the Itoh-Tsujii chain over a
+  Karatsuba multiplier with a masked carry-less product. Algorithm 3 is
+  implemented with masked duplicate checks and a scatter that visits
+  every word. Under ctgrind BIKE went from 30 findings per parameter set
+  (in key generation, encapsulation and decapsulation) to none, and it is
+  now in the CI gate. In a gcc -O2 release build, key generation takes
+  15, 53 and 109 ms at L1, L3 and L5, encapsulation 0.9, 3.1 and 6.1 ms,
+  and decapsulation 5, 16 and 34 ms whatever the ciphertext; before, a
+  malformed ciphertext took 22 to 148 s to decapsulate.
+
+### Added
+
+- **Constant-time verification ("ctgrind").** `tests/ct/test_ct` replaces
+  the RNG with one that marks every byte it returns as undefined to
+  Valgrind; memcheck then reports any branch or memory address derived
+  from secret data, through keygen, encapsulation, decapsulation of a
+  valid and of a modified ciphertext, and signing. Values that the
+  specifications make public -- the matrix seed rho, the ML-DSA challenge,
+  SLH-DSA's randomizer R and the roots it signs, signatures and public
+  keys -- are marked public at the point they become so with
+  `PQC_CT_DECLASSIFY()` (`src/core/common/ct_check.h`), each with a
+  comment saying why; that annotation compiles to nothing outside a
+  `PQC_ENABLE_CT_TESTING` build. `tests/ct/run_ctgrind.py` runs one
+  Valgrind process per algorithm and reports each finding by operation
+  and source line.
+
+  Before the fixes above, ML-KEM had 2 sites, ML-DSA 9, the P-256 hybrids
+  7 and 17, FrodoKEM 1 that hid 2 more behind it, and SLH-DSA, SPHINCS+,
+  XMSS and LMS 1 to 3 each. All of those are now clean, and
+  `tests/ct/ct_gate.txt` lists them: ML-KEM, ML-DSA, SLH-DSA, the four
+  hybrids, BIKE, FrodoKEM, LMS-SHA256-H10 and XMSS-SHA2-10-256. CI fails if any
+  of them regresses. Every other algorithm is run weekly and reported;
+  see Known issues.
+
+  A clean result means memcheck saw no secret-dependent branch or address
+  on the paths exercised, in that build (gcc -O2, x86-64). It does not
+  see variable-time instructions such as division, paths not taken, or
+  what another compiler would emit. It is evidence, not proof.
+- `test_security_audit`: the implicit-rejection group now also checks
+  that a modified ciphertext yields a secret different from the real one,
+  and the same secret each time, and that every KEM in the group except
+  NTRU round-trips. With the FrodoKEM select inverted, it fails.
+- **Fuzz targets.** `tests/fuzz/fuzz_sig_verify` feeds attacker-chosen
+  signatures, public keys, context strings (including over-long ones) and
+  signature lengths to verification for every signature algorithm, and
+  mutations of a valid signature so inputs get past the format checks.
+  `tests/fuzz/fuzz_kem` feeds attacker-chosen and mutated ciphertexts to
+  decapsulation and attacker-chosen public keys to encapsulation, for
+  every KEM. Built with `-DPQC_BUILD_FUZZERS=ON` (Clang), under
+  AddressSanitizer and UndefinedBehaviorSanitizer. The CI fuzzing job,
+  which until now printed a message and fuzzed nothing, runs each for 10
+  minutes with a corpus cached between runs and fails on any crash,
+  sanitizer report or timeout. Algorithms whose key generation is too
+  slow under ASan to set up per process (Classic McEliece, the larger
+  LMS and XMSS trees, the SLH-DSA/SPHINCS+ SHAKE "s" sets) and FN-DSA
+  are fuzzed with attacker-chosen keys only.
+- **Known-answer tests for BIKE**, the first for a post-quantum algorithm
+  in this repository. `tests/kat/test_kat_bike` regenerates the complete
+  NIST response file for each level -- 100 vectors from NIST's AES-256
+  CTR DRBG, exactly as PQCgenKAT_kem does -- and compares its SHA-256
+  with that of the official `PQCkemKAT_BIKE_{3114,6198,10276}.rsp` from
+  NIST's round 4 package (BIKE-Round4.zip). Only the hashes are stored.
+  It also decapsulates every vector, and checks that a modified
+  ciphertext decapsulates to K(sigma, c'), which the KATs do not cover.
+  Taking K from the wrong half of the digest fails both. Labelled `kat`
+  in ctest. `tests/kat/nist_drbg.c` holds the DRBG and a test-only
+  AES-256 (checked against FIPS 197 C.3), for reuse by later KATs.
+- `pqc_sha3_384()`, with FIPS 202 test vectors in `test_hash`.
+- **Known-answer tests for ML-KEM**, from NIST's ACVP vectors for FIPS
+  203 (usnistgov/ACVP-Server, pinned commit; provenance in the file
+  header). `tests/kat/test_kat_mlkem` runs 240 of them across the three
+  parameter sets: key generation from (d, z), encapsulation from (ek, m),
+  decapsulation including ciphertexts that must be implicitly rejected,
+  and the section 7.2 and 7.3 key checks. ACVP gives d, z and m directly,
+  so they are fed through the RNG hook, and a test fails if the library
+  draws other than exactly 64 bytes for key generation or 32 for
+  encapsulation. `tests/kat/mlkem_acvp.txt` (646 KB) keeps inputs
+  verbatim and large outputs as SHA-256; `tests/kat/tools/
+  acvp_mlkem_to_kat.py` regenerates it from the ACVP JSON. Key
+  generation, encapsulation and decapsulation passed all 180 vectors
+  unchanged; the key checks found the defect above.
+- **Known-answer tests for ML-DSA and SLH-DSA**, from NIST's ACVP
+  vectors for FIPS 204 and 205 (same source and pinned commit).
+  `tests/kat/test_kat_sig_acvp` runs key generation from the seeds,
+  deterministic and hedged signing, and verification (including the
+  invalid signatures), through `pqc_sig_sign_ctx` /
+  `pqc_sig_verify_ctx`, feeding seeds and signing randomness through the
+  RNG hook and failing if the library draws other than the specified
+  number of bytes. ML-DSA: 210 vectors (75 key generation, 90 signing,
+  45 verification); SLH-DSA: 344 (120, 168, 56). All passed with no
+  library changes, which confirms the 0.3.0 FIPS 204 / 205 fixes against
+  NIST rather than only OpenSSL. With ML-DSA's domain-separation byte
+  changed from 0x00 to 0x01, all 90 signing vectors fail.
+
+  Not run, because the library has no API for them: the internal
+  interface, HashML-DSA / HashSLH-DSA (pre-hash) and ML-DSA's
+  external-mu groups. The vector files' headers count them. SLH-DSA
+  verification vectors carry whole signatures (about 10 MB as hex for
+  all sets), so `tests/kat/slhdsa_acvp.txt` keeps those for the four
+  128-bit parameter sets only (56 of 168); `tests/kat/tools/
+  acvp_sig_to_kat.py` can regenerate the full set. ctest runs one
+  SLH-DSA signing vector per parameter set; the CI known-answer job runs
+  all 168. The two vector files are 2.3 and 3.4 MB.
+
+- `pqc_sig_sign_ctx()` and `pqc_sig_verify_ctx()`: sign and verify with a
+  context string of up to 255 bytes. `pqc_sig_sign()` and
+  `pqc_sig_verify()` are these with an empty context. For an algorithm
+  with no context input, a non-empty context returns
+  `PQC_ERROR_NOT_SUPPORTED` rather than being dropped.
+- `tests/interop/`: a small command-line front end to the signature API,
+  and `openssl_interop.py`, which signs with libpqc-dyber and verifies
+  with OpenSSL and the reverse, for all 3 ML-DSA and 12 SLH-DSA parameter
+  sets, with and without a context. It also checks that a signature is
+  rejected under a different context by both implementations. 90 checks.
+  As negative controls: with the old ML-DSA message hashing put back, 15
+  of the 18 ML-DSA checks fail; with the old SLH-DSA address layout and
+  SHA-2 hashing, all 48 cross-implementation SLH-DSA checks fail.
+  Registered with ctest under the `interop`
+  label (skipped where OpenSSL lacks the algorithms), and run in a new CI
+  job against the system OpenSSL on Ubuntu 26.04, where a skip counts as
+  a failure.
+- `test_security_audit`: an SLH-DSA invariant group. Distinct key-pair
+  indices must give distinct FORS and WOTS+ public keys, the caller's
+  key-pair address must survive a call, and `H_msg` must write exactly m
+  bytes. Also a context-string group for the new API.
+
+### Changed
+
+- SLH-DSA PRF_msg with SHA-256 now streams the message instead of copying
+  messages under 64 KiB into a stack buffer first.
+- The two CI jobs named "Constant-Time Verification" ran plain Valgrind
+  memcheck. They set `PQC_CT_TESTING`, which nothing in the library read,
+  so they could not see a timing leak. They now run the ctgrind check
+  above: per commit on the gated algorithms (blocking), and weekly on all
+  of them.
+- `test_fndsa_quick` printed "FAIL" when FN-DSA key generation failed --
+  which it always does -- and exited 0, so CI showed it passing. It now
+  exits 1 on any failure and covers both parameter sets. It is registered
+  as an expected failure judged by its output: it passes only if both
+  sets report the known key-generation failure and no sanitizer reports
+  an error, so a memory error in FN-DSA key generation still fails CI.
+  When key generation starts working the test fails, as a prompt to make
+  it an ordinary one.
+- BIKE's position sampler drew 31-bit candidates and rejected those out
+  of range, accepting about 6 in a million, so key generation took 0.6
+  to 0.9 s and encapsulation 0.3 to 0.4 s. It is replaced by the
+  specified Algorithm 3, which never rejects.
+- BIKE is on the round-trip allow list in `test_kem_all.c`.
+- CI, benchmark and release builds on macOS move to macOS 15
+  (`macos-15` for arm64, `macos-15-intel` for x86_64). GitHub retired the
+  `macos-13` and `macos-14` images they used, so those jobs had stopped
+  running at all.
+
+### Known issues
+
+From the ctgrind run over every algorithm:
+
+- **HQC is not constant time** (8 findings in each parameter set):
+  fixed-weight sampling that branches and indexes on secret positions,
+  sparse polynomial multiplication indexed by secret positions,
+  table-based GF(2^m) arithmetic and a branching decoder. This is
+  structural and left for a dedicated change.
+- CROSS, Classic McEliece, MAYO, NTRU, NTRU Prime, SNOVA and UOV do not
+  round-trip under the check (decapsulation disagrees with encapsulation,
+  or a signature does not verify), and FN-DSA key generation fails
+  (already listed under 0.2.0). This matches their absence from the
+  round-trip allow lists. A timing result means nothing until they are
+  correct. LMS H20 and H25 key generation is not implemented.
+
 ## [0.2.1] - 2026-11-10
 
 This is a security release. The classical half of every hybrid scheme —
@@ -29,6 +379,8 @@ byte, X25519 did not. The first two entries below are that report; the
 rest came from auditing the remaining code in `src/core/hybrid/` the same
 way. None of it had known-answer tests, and the hybrid schemes were not on
 the round-trip allow list either.
+
+Reported by Conner (Spartan8806, https://github.com/spartan8806).
 
 ### Security
 

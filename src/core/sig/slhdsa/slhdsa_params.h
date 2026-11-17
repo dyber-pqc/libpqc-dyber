@@ -82,6 +82,27 @@ typedef struct {
     size_t ht_sig_bytes;    /* d * (hp * n + wots_sig_bytes)           */
 } slhdsa_params_t;
 
+/*
+ * m, the H_msg output length in bytes (FIPS 205 Algorithm 19 / Table 2):
+ *
+ *   m = ceil(k*a / 8) + ceil((h - h/d) / 8) + ceil((h/d) / 8)
+ *
+ * Each of the three fields is rounded up to whole bytes separately,
+ * because split_digest() reads them as three separate byte strings. This
+ * is the single definition both the producer (H_msg) and the consumer
+ * (split_digest) use. They previously computed it differently -- H_msg
+ * used ceil((k*a + h) / 8), rounding once over the total -- which is one
+ * byte short in 8 of the 12 parameter sets. The unwritten byte was read as
+ * part of idx_leaf, which is why 128f and 256f only ever used layer-0 leaf
+ * 0 and 128s/192s reached 2 of 512 leaves.
+ */
+static inline size_t slhdsa_hmsg_bytes(const slhdsa_params_t *p)
+{
+    return ((size_t)p->k * p->a + 7) / 8
+         + ((size_t)(p->h - p->hp) + 7) / 8
+         + ((size_t)p->hp + 7) / 8;
+}
+
 /* ------------------------------------------------------------------ */
 /* The 12 FIPS 205 parameter sets                                       */
 /* ------------------------------------------------------------------ */

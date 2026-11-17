@@ -46,6 +46,17 @@ option(PQC_ENABLE_SIG_XMSS "Enable XMSS (RFC 8391)" ON)
 
 option(PQC_ENABLE_HYBRID "Enable hybrid schemes" ON)
 
+# Constant-time verification with Valgrind ("ctgrind"). Builds the library
+# with PQC_CT_TESTING, which turns the PQC_CT_DECLASSIFY annotations into
+# Valgrind client requests, and builds tests/ct/test_ct. Needs the Valgrind
+# headers. Not for production builds.
+option(PQC_ENABLE_CT_TESTING "Build for constant-time checking under Valgrind" OFF)
+
+# libFuzzer targets in tests/fuzz (Clang only). Instruments the library for
+# coverage; pass the sanitizers to use in CMAKE_C_FLAGS, e.g.
+# -fsanitize=address,undefined -fno-sanitize-recover=undefined.
+option(PQC_BUILD_FUZZERS "Build libFuzzer targets (Clang)" OFF)
+
 # Include CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/CompilerFlags.cmake)
@@ -290,6 +301,31 @@ if(PQC_BUILD_STATIC)
         set_target_properties(pqc_static PROPERTIES OUTPUT_NAME pqc)
     endif()
     target_compile_definitions(pqc_static PRIVATE PQC_BUILD)
+endif()
+
+if(PQC_BUILD_FUZZERS)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "PQC_BUILD_FUZZERS needs Clang (libFuzzer)")
+    endif()
+    if(NOT PQC_BUILD_TESTS)
+        message(FATAL_ERROR "PQC_BUILD_FUZZERS needs PQC_BUILD_TESTS")
+    endif()
+    if(TARGET pqc_static)
+        target_compile_options(pqc_static PRIVATE -fsanitize=fuzzer-no-link)
+    endif()
+endif()
+
+if(PQC_ENABLE_CT_TESTING)
+    include(CheckIncludeFile)
+    check_include_file(valgrind/memcheck.h PQC_HAVE_VALGRIND_MEMCHECK_H)
+    if(NOT PQC_HAVE_VALGRIND_MEMCHECK_H)
+        message(FATAL_ERROR
+            "PQC_ENABLE_CT_TESTING needs valgrind/memcheck.h "
+            "(install Valgrind or its development headers)")
+    endif()
+    if(TARGET pqc_static)
+        target_compile_definitions(pqc_static PRIVATE PQC_CT_TESTING=1)
+    endif()
 endif()
 
 # Shared library

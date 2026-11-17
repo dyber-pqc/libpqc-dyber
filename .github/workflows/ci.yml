@@ -86,28 +86,28 @@ jobs:
     name: macOS (${{ matrix.arch }}, ${{ matrix.build_type }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    # Only the x86_64 entry is advisory. macos-13 is the Intel image GitHub
-    # is retiring, and capacity for it has dried up: this job sat queued
-    # and was superseded in five consecutive runs without ever starting.
-    # That is a runner-availability problem, not a signal about the code,
-    # and it should not gate the run -- the same treatment FreeBSD already
-    # gets below. The arm64 entries stay blocking.
+    # Runner images: GitHub retired macos-13 (Intel) in 2025 and macos-14
+    # on 2026-11-02, after which these jobs failed with "configuration not
+    # supported" without ever starting. They now pin macOS 15: macos-15
+    # (arm64) and macos-15-intel (x86_64, which GitHub supports until the
+    # macOS 15 image is retired). Pinned rather than macos-latest so that
+    # an image change is a deliberate edit, not a surprise.
     #
-    # Worth revisiting: retarget to whichever Intel image currently has
-    # capacity, since this library does carry x86_64 assembly paths and
-    # losing Intel coverage is a real gap, not a tidy-up.
+    # Only the x86_64 entry is advisory, as before: Intel capacity has been
+    # the scarce one, and a queue there should not gate the run. The arm64
+    # entries stay blocking.
     continue-on-error: ${{ matrix.arch == 'x86_64' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
             build_type: Release
-          - runner: macos-13
+          - runner: macos-15-intel
             arch: x86_64
             build_type: Release
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
             build_type: Debug
     steps:
@@ -219,9 +219,15 @@ jobs:
             # (XMSS rebuilds a Merkle tree per signature, LMS builds 2^10
             # leaves) and test_fndsa_quick (FN-DSA keygen). All three still
             # run under ASan and UBSan above, so they are unchecked only by
-            # MSan. See the matching note in security.yml.
+            # MSan. See the matching note in security.yml. The OpenSSL
+            # interop test (label "interop") signs with every SLH-DSA
+            # parameter set through an instrumented tool and has its own job.
+            # test_kat_slhdsa and test_kat_bike (300 BIKE key generations,
+            # encapsulations and decapsulations) exceed the timeout under
+            # MSan; both run in the KAT job and under ASan and UBSan.
             ctest --test-dir build --output-on-failure --timeout 1800 \
-              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick"
+              --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa|test_kat_bike" \
+              --label-exclude interop
           else
             ctest --test-dir build --output-on-failure --timeout 1800
           fi
@@ -263,35 +269,49 @@ jobs:
             --error-exitcode=1 \
             ./build/tests/test_hash
 
+  # Constant-time check (ctgrind): the library's RNG output is marked
+  # undefined, so memcheck reports every branch and memory index derived
+  # from secrets. See tests/ct/test_ct.c. Blocking for the algorithms in
+  # tests/ct/ct_gate.txt; the full report runs weekly in security.yml.
   constant-time:
-    name: Constant-Time Verification
+    name: Constant-Time Verification (ctgrind)
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build valgrind
-      - name: Build with CT instrumentation
-        # -O1 for the same reason as the Valgrind job above: at -O0 this
-        # exceeded the one-hour ceiling and was killed.
+      - name: Build
+        # -O2: the optimised code is what ships, and what the compiler
+        # emits at -O2 is what has to be free of secret-dependent branches.
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DPQC_BUILD_TESTS=ON \
-            -DCMAKE_C_FLAGS="-DPQC_CT_TESTING=1 -g -O1"
-          cmake --build build
-      - name: Run constant-time checks
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g" \
+            -DPQC_ENABLE_CT_TESTING=ON \
+            -DPQC_BUILD_SHARED=OFF \
+            -DPQC_BUILD_BENCHMARKS=OFF \
+            -DPQC_BUILD_CLI=OFF
+          cmake --build build --target test_ct
+      - name: Run ctgrind on gated algorithms
         run: |
-          valgrind --tool=memcheck \
-            --track-origins=yes \
-            --error-exitcode=1 \
-            ./build/tests/test_kem 2>&1 | tee ct_kem.log
-          valgrind --tool=memcheck \
-            --track-origins=yes \
-            --error-exitcode=1 \
-            ./build/tests/test_sig 2>&1 | tee ct_sig.log
+          python3 tests/ct/run_ctgrind.py build/tests/test_ct \
+            --gate tests/ct/ct_gate.txt --gate-only \
+            --report ct-report.md --logs ct-logs
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctgrind-gated
+          path: |
+            ct-report.md
+            ct-logs/
 
+  # libFuzzer on the inputs an attacker controls: signature verification
+  # (signature, public key, context) and KEM decapsulation / encapsulation
+  # (ciphertext, public key). See tests/fuzz/*.c. Any crash, sanitizer
+  # report, timeout or out-of-memory fails the job and its input is
+  # uploaded. The corpus is cached between runs so coverage accumulates.
   fuzzing:
     name: Fuzz Testing
     runs-on: ubuntu-latest
@@ -300,18 +320,47 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang
-      - name: Build with fuzzing
+      - name: Build fuzz targets
         env:
           CC: clang
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DPQC_BUILD_TESTS=ON \
-            -DCMAKE_C_FLAGS="-fsanitize=fuzzer-no-link,address"
-          cmake --build build
-      - name: Run quick fuzz (60 seconds per target)
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPQC_BUILD_FUZZERS=ON \
+            -DPQC_BUILD_SHARED=OFF \
+            -DPQC_BUILD_BENCHMARKS=OFF \
+            -DPQC_BUILD_CLI=OFF \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          cmake --build build --target fuzz_sig_verify fuzz_kem
+      - name: Restore corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz (10 minutes per target)
         run: |
-          echo "Fuzzing infrastructure ready — add fuzz targets in tests/fuzz/"
+          mkdir -p crashes
+          status=0
+          for fz in fuzz_sig_verify fuzz_kem; do
+            mkdir -p corpus/$fz
+            ./build/tests/$fz -max_total_time=600 -timeout=120 \
+              -rss_limit_mb=4096 -print_final_stats=1 \
+              -artifact_prefix=crashes/$fz- corpus/$fz || status=1
+          done
+          exit $status
+      - name: Save corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ github.run_id }}
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: crashes/
 
   static-analysis:
     name: Static Analysis
@@ -362,9 +411,12 @@ jobs:
       # and fails if that selection is empty, so a vector suite cannot drop
       # out of the run silently.
       #
-      # Labelled today: test_hash (FIPS 180-4, FIPS 202, RFC 4231) and
-      # test_hybrid_classical (RFC 7748, RFC 8032, RFC 6979, NIST CAVP).
-      # There are not yet vectors for the post-quantum algorithms.
+      # Labelled today: test_hash (FIPS 180-4, FIPS 202, RFC 4231),
+      # test_hybrid_classical (RFC 7748, RFC 8032, RFC 6979, NIST CAVP),
+      # test_kat_bike (official round 4 KATs), and test_kat_mlkem,
+      # test_kat_mldsa and test_kat_slhdsa (NIST ACVP vectors for FIPS
+      # 203, 204 and 205). test_kat_slhdsa runs one signing vector per
+      # parameter set; the next step runs all of them.
       - name: Run known-answer vector tests
         run: |
           set -euo pipefail
@@ -375,10 +427,38 @@ jobs:
             exit 1
           fi
           ctest --test-dir build --output-on-failure -L kat
+      - name: Run every SLH-DSA ACVP signing vector
+        run: ./build/tests/test_kat_sig_acvp tests/kat/slhdsa_acvp.txt
       - name: Run KEM round-trip tests
         run: ./build/tests/test_kem
       - name: Run Signature round-trip tests
         run: ./build/tests/test_sig
+
+  interop:
+    name: Interoperability (OpenSSL >= 3.5, ML-DSA / SLH-DSA)
+    # Signs with libpqc and verifies with OpenSSL, and the reverse, for every
+    # ML-DSA and SLH-DSA parameter set, with and without a context string.
+    # A round-trip test cannot see a defect that sign and verify share; this
+    # can. ubuntu-latest (Ubuntu 26.04) ships OpenSSL 3.5, which has both
+    # algorithms; this job previously used Homebrew's openssl@3 on macOS.
+    # The driver runs directly rather than under ctest, because under ctest
+    # a missing algorithm is "skipped" (exit 77), which here must fail --
+    # as must an OpenSSL without the algorithms.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build openssl
+      - name: Build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPQC_BUILD_TESTS=ON
+          cmake --build build --target pqc_sig_tool
+      - name: Cross-check against OpenSSL
+        run: |
+          set -euo pipefail
+          openssl version
+          python3 tests/interop/openssl_interop.py build/tests/pqc_sig_tool --require-all --openssl openssl
 
   benchmarks:
     name: Performance Benchmarks
@@ -404,12 +484,19 @@ jobs:
 
   binding-python:
     name: Python Binding
-    runs-on: ubuntu-latest
+    # ubuntu-latest is Ubuntu 26.04, which has no Python 3.9 build; 3.9 is
+    # still inside the binding's declared range, so it runs on 24.04.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     needs: build-linux
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest]
+        include:
+          - python-version: '3.9'
+            os: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -494,6 +581,10 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          # Keep downloaded Maven plugins between runs: every run fetching
+          # them from Maven Central is how this job got rate-limited (429).
+          cache: 'maven'
+          cache-dependency-path: bindings/java/pom.xml
       - name: Build and install core library
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -515,7 +606,23 @@ jobs:
             src/main/native/com_dyber_pqc_PQC.c \
             -o libpqc_jni.so -lpqc
       - name: Test Java bindings
-        run: cd bindings/java && mvn test -DargLine="-Djava.library.path=$PWD"
+        # Retried only when Maven reports that it could not download from
+        # the repository (Maven Central answers 429 under load). A test or
+        # build failure is never retried.
+        run: |
+          set -o pipefail
+          cd bindings/java
+          for attempt in 1 2 3; do
+            if mvn -B test -DargLine="-Djava.library.path=$PWD" 2>&1 | tee mvn.log; then
+              exit 0
+            fi
+            if ! grep -qE "Could not transfer artifact|Could not resolve dependencies|could not be resolved" mvn.log; then
+              exit 1
+            fi
+            echo "Maven repository error (attempt $attempt); retrying in $((attempt * 30)) s"
+            sleep $((attempt * 30))
+          done
+          exit 1
 
   binding-csharp:
     name: C# Binding

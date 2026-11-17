@@ -23,6 +23,9 @@
 #include "core/sig/xmss/xmss_params.h"
 #include "core/sig/snova/snova_params.h"
 #include "core/sig/cross/cross_params.h"
+#ifdef PQC_TEST_SLHDSA_INTERNALS
+#include "core/sig/slhdsa/slhdsa.h"
+#endif
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -251,6 +254,111 @@ static void test_xmss_wots_roundtrip(void)
 }
 
 #endif /* PQC_TEST_XMSS_INTERNALS */
+
+/* ------------------------------------------------------------------ */
+/* 8. SLH-DSA: key-pair address separation and H_msg length            */
+/*                                                                      */
+/* The class-level invariant behind the XMSS and SLH-DSA defects: two   */
+/* distinct key-pair (or leaf) indices must produce different output.   */
+/* Both schemes broke it with a setter that cleared a field the caller  */
+/* had populated, and both round-tripped perfectly while broken,        */
+/* because signing and verification shared the defect. Round-trip       */
+/* tests cannot see this class; only this kind of assertion can.        */
+/* ------------------------------------------------------------------ */
+
+#ifdef PQC_TEST_SLHDSA_INTERNALS
+
+static void test_slhdsa_invariants(void)
+{
+    static const struct { const char *name; const slhdsa_params_t *p; } sets[] = {
+        { "SHA2-128s",  &SLHDSA_SHA2_128S  }, { "SHA2-128f",  &SLHDSA_SHA2_128F  },
+        { "SHA2-192s",  &SLHDSA_SHA2_192S  }, { "SHA2-192f",  &SLHDSA_SHA2_192F  },
+        { "SHA2-256s",  &SLHDSA_SHA2_256S  }, { "SHA2-256f",  &SLHDSA_SHA2_256F  },
+        { "SHAKE-128s", &SLHDSA_SHAKE_128S }, { "SHAKE-128f", &SLHDSA_SHAKE_128F },
+        { "SHAKE-192s", &SLHDSA_SHAKE_192S }, { "SHAKE-192f", &SLHDSA_SHAKE_192F },
+        { "SHAKE-256s", &SLHDSA_SHAKE_256S }, { "SHAKE-256f", &SLHDSA_SHAKE_256F },
+    };
+    static uint8_t fors_sig[SLHDSA_MAX_FORS_TREES * (SLHDSA_MAX_A + 1) * SLHDSA_MAX_N];
+    uint8_t sk_seed[SLHDSA_MAX_N], pub_seed[SLHDSA_MAX_N];
+    uint8_t pk[2 * SLHDSA_MAX_N], R[SLHDSA_MAX_N];
+    uint8_t md[SLHDSA_MAX_FORS_TREES * SLHDSA_MAX_A / 8 + 1];
+    uint8_t out0[SLHDSA_MAX_N], out1[SLHDSA_MAX_N];
+    uint8_t addr[32];
+    const uint8_t msg[] = "slh-dsa invariant";
+    size_t s, i;
+    char label[128];
+
+    printf("\n[8] SLH-DSA: distinct key-pair indices give distinct output\n");
+
+    for (i = 0; i < sizeof(sk_seed); i++) {
+        sk_seed[i] = (uint8_t)(0x11 * i + 3);
+        pub_seed[i] = (uint8_t)(0x07 * i + 9);
+        R[i] = (uint8_t)(0x35 * i + 1);
+    }
+    for (i = 0; i < sizeof(pk); i++) pk[i] = (uint8_t)(0x5b * i + 2);
+    for (i = 0; i < sizeof(md); i++) md[i] = (uint8_t)(0x9d * i + 4);
+
+    for (s = 0; s < sizeof(sets) / sizeof(sets[0]); s++) {
+        const slhdsa_params_t *p = sets[s].p;
+        uint32_t last_leaf = (1u << p->hp) - 1;
+        size_t m = slhdsa_hmsg_bytes(p);
+        uint8_t h_a[128], h_b[128];
+        int fors_differs, wots_differs, kp_kept, hmsg_exact;
+
+        /* FORS: same message digest and tree, key pair 0 vs the last one. */
+        memset(addr, 0, 32);
+        slhdsa_set_tree_addr(addr, 5);
+        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_FORSTREE);
+        slhdsa_set_keypair_addr(addr, 0);
+        slhdsa_fors_sign(fors_sig, md, sk_seed, pub_seed, addr, p);
+        slhdsa_fors_pk_from_sig(out0, fors_sig, md, pub_seed, addr, p);
+
+        memset(addr, 0, 32);
+        slhdsa_set_tree_addr(addr, 5);
+        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_FORSTREE);
+        slhdsa_set_keypair_addr(addr, last_leaf);
+        slhdsa_fors_sign(fors_sig, md, sk_seed, pub_seed, addr, p);
+        slhdsa_fors_pk_from_sig(out1, fors_sig, md, pub_seed, addr, p);
+        fors_differs = memcmp(out0, out1, p->n) != 0;
+
+        /* WOTS+: key pair 0 vs the last one, and the caller's key-pair
+         * address must survive the call. */
+        memset(addr, 0, 32);
+        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+        slhdsa_set_keypair_addr(addr, 0);
+        slhdsa_wots_gen_pk(out0, sk_seed, pub_seed, addr, p);
+
+        memset(addr, 0, 32);
+        slhdsa_set_type(addr, SLHDSA_ADDR_TYPE_WOTS);
+        slhdsa_set_keypair_addr(addr, last_leaf);
+        slhdsa_wots_gen_pk(out1, sk_seed, pub_seed, addr, p);
+        wots_differs = memcmp(out0, out1, p->n) != 0;
+        kp_kept = slhdsa_get_keypair_addr(addr) == last_leaf;
+
+        /* H_msg must write exactly m bytes: prefill two buffers differently,
+         * so any byte it leaves unwritten differs between them. */
+        memset(h_a, 0x00, sizeof(h_a));
+        memset(h_b, 0xFF, sizeof(h_b));
+        slhdsa_hash_msg(h_a, R, pk, NULL, 0, msg, sizeof(msg), p);
+        slhdsa_hash_msg(h_b, R, pk, NULL, 0, msg, sizeof(msg), p);
+        hmsg_exact = memcmp(h_a, h_b, m) == 0 && h_a[m] != h_b[m];
+
+        snprintf(label, sizeof(label),
+                 "SLH-DSA-%s: FORS output depends on key-pair address", sets[s].name);
+        check(fors_differs, label);
+        snprintf(label, sizeof(label),
+                 "SLH-DSA-%s: WOTS+ pk depends on key-pair address", sets[s].name);
+        check(wots_differs, label);
+        snprintf(label, sizeof(label),
+                 "SLH-DSA-%s: WOTS+ keeps the caller's key-pair address", sets[s].name);
+        check(kp_kept, label);
+        snprintf(label, sizeof(label),
+                 "SLH-DSA-%s: H_msg writes exactly m=%zu bytes", sets[s].name, m);
+        check(hmsg_exact, label);
+    }
+}
+
+#endif /* PQC_TEST_SLHDSA_INTERNALS */
 
 /* ------------------------------------------------------------------ */
 /* 4. XMSS: WOTS+ checksum must sign its top nibble                     */
@@ -524,6 +632,7 @@ static void test_kem_implicit_rejection(void)
         }
 
         rc_good = pqc_kem_decaps(kem, ss2, ct, sk);
+        int roundtrip = (rc_good == PQC_OK && memcmp(ss1, ss2, ss_len) == 0);
 
         /* Corrupt the ciphertext so decapsulation must implicitly reject. */
         ct[0] ^= 0xFF;
@@ -538,8 +647,142 @@ static void test_kem_implicit_rejection(void)
                  algs[a]);
         check(rc_good == rc_bad, label);
 
+        /*
+         * The rejection key must actually be used: a corrupt ciphertext
+         * yields a secret other than the encapsulated one, and the same
+         * secret every time (it is derived from the secret seed s, not
+         * from fresh randomness). Decapsulation now selects between k'
+         * and s with a mask rather than a branch, and a wrong mask would
+         * pass the status check above. Only meaningful for a KEM that
+         * round-trips.
+         */
+        if (roundtrip) {
+            uint8_t *ss3 = (uint8_t *)calloc(1, ss_len);
+            if (ss3 && pqc_kem_decaps(kem, ss3, ct, sk) == PQC_OK) {
+                snprintf(label, sizeof(label),
+                         "%s: rejection secret differs from the real one", algs[a]);
+                check(memcmp(ss2, ss1, ss_len) != 0, label);
+                snprintf(label, sizeof(label),
+                         "%s: rejection secret is deterministic", algs[a]);
+                check(memcmp(ss2, ss3, ss_len) == 0, label);
+            }
+            free(ss3);
+        } else if (strncmp(algs[a], "NTRU-", 5) == 0) {
+            /* NTRU does not round-trip yet (see CHANGELOG known issues). */
+            printf("  SKIP  %s rejection-secret checks (does not round-trip)\n",
+                   algs[a]);
+        } else {
+            snprintf(label, sizeof(label),
+                     "%s: valid ciphertext decapsulates to the encapsulated secret",
+                     algs[a]);
+            check(0, label);
+        }
+
         free(pk); free(sk); free(ct); free(ss1); free(ss2);
         pqc_kem_free(kem);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* [9] FIPS 204 / FIPS 205 context strings                              */
+/*                                                                      */
+/* Until 0.3.0, ML-DSA and SLH-DSA signed M itself (the *_internal      */
+/* functions) instead of M' = 0x00 || |ctx| || ctx || M, so they did    */
+/* not interoperate and could not bind a context. Conformance is        */
+/* checked against OpenSSL by tests/interop; this checks the API.       */
+/* ------------------------------------------------------------------ */
+
+static void test_sig_context(void)
+{
+    static const char *ctx_algs[] = { PQC_SIG_ML_DSA_44, PQC_SIG_SLH_DSA_SHAKE_128F };
+    static const uint8_t msg[] = "context binding";
+    static uint8_t ctx255[256];
+    const uint8_t ctx_a[] = "purpose-a", ctx_b[] = "purpose-b";
+    char label[160];
+    size_t i;
+
+    printf("\n[9] Context strings (FIPS 204 sec. 5.2 / FIPS 205 sec. 10.2)\n");
+    memset(ctx255, 0x5A, sizeof ctx255);
+
+    for (i = 0; i < sizeof ctx_algs / sizeof ctx_algs[0]; i++) {
+        PQC_SIG *sig = pqc_sig_new(ctx_algs[i]);
+        uint8_t *pk, *sk, *s1, *s2;
+        size_t l1 = 0, l2 = 0;
+
+        if (!sig) {
+            /* Left out of this build (e.g. the minimal CI build) is a skip;
+             * compiled in but not constructible is a failure. */
+            if (pqc_sig_is_enabled(ctx_algs[i]))
+                check(0, ctx_algs[i]);
+            else
+                printf("  SKIP  %s (not in this build)\n", ctx_algs[i]);
+            continue;
+        }
+        pk = malloc(pqc_sig_public_key_size(sig));
+        sk = malloc(pqc_sig_secret_key_size(sig));
+        s1 = malloc(pqc_sig_max_signature_size(sig));
+        s2 = malloc(pqc_sig_max_signature_size(sig));
+        if (!pk || !sk || !s1 || !s2 || pqc_sig_keygen(sig, pk, sk) != PQC_OK) {
+            check(0, "setup");
+        } else {
+            /* Plain API == empty context, in both directions. */
+            pqc_sig_sign(sig, s1, &l1, msg, sizeof msg, sk);
+            pqc_sig_sign_ctx(sig, s2, &l2, msg, sizeof msg, NULL, 0, sk);
+            snprintf(label, sizeof label, "%s: pqc_sig_sign verifies as empty ctx", ctx_algs[i]);
+            check(pqc_sig_verify_ctx(sig, msg, sizeof msg, NULL, 0, s1, l1, pk) == PQC_OK, label);
+            snprintf(label, sizeof label, "%s: empty-ctx signature verifies via pqc_sig_verify", ctx_algs[i]);
+            check(pqc_sig_verify(sig, msg, sizeof msg, s2, l2, pk) == PQC_OK, label);
+
+            /* A context is bound into the signature. */
+            check(pqc_sig_sign_ctx(sig, s1, &l1, msg, sizeof msg,
+                                   ctx_a, sizeof ctx_a - 1, sk) == PQC_OK, "sign with ctx");
+            snprintf(label, sizeof label, "%s: verifies under the same ctx", ctx_algs[i]);
+            check(pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx_a, sizeof ctx_a - 1,
+                                     s1, l1, pk) == PQC_OK, label);
+            snprintf(label, sizeof label, "%s: rejected under a different ctx", ctx_algs[i]);
+            check(pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx_b, sizeof ctx_b - 1,
+                                     s1, l1, pk) == PQC_ERROR_VERIFICATION_FAILED, label);
+            snprintf(label, sizeof label, "%s: rejected with no ctx", ctx_algs[i]);
+            check(pqc_sig_verify(sig, msg, sizeof msg, s1, l1, pk)
+                  == PQC_ERROR_VERIFICATION_FAILED, label);
+
+            /* Length limits: 255 is the maximum, 256 is refused. */
+            snprintf(label, sizeof label, "%s: 255-byte ctx round-trips", ctx_algs[i]);
+            check(pqc_sig_sign_ctx(sig, s1, &l1, msg, sizeof msg, ctx255, 255, sk) == PQC_OK &&
+                  pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx255, 255, s1, l1, pk) == PQC_OK,
+                  label);
+            snprintf(label, sizeof label, "%s: 256-byte ctx refused (sign) / false (verify)", ctx_algs[i]);
+            check(pqc_sig_sign_ctx(sig, s2, &l2, msg, sizeof msg, ctx255, 256, sk)
+                      == PQC_ERROR_INVALID_ARGUMENT &&
+                  pqc_sig_verify_ctx(sig, msg, sizeof msg, ctx255, 256, s1, l1, pk)
+                      == PQC_ERROR_VERIFICATION_FAILED,
+                  label);
+        }
+        free(pk); free(sk); free(s1); free(s2);
+        pqc_sig_free(sig);
+    }
+
+    /* A scheme with no context input must not silently drop one. SPHINCS+
+     * round 3 is the same code as SLH-DSA without the M' prefix. */
+    {
+        PQC_SIG *sig = pqc_sig_new(PQC_SIG_SPHINCS_SHAKE_128F);
+        if (sig) {
+            uint8_t *pk = malloc(pqc_sig_public_key_size(sig));
+            uint8_t *sk = malloc(pqc_sig_secret_key_size(sig));
+            uint8_t *sg = malloc(pqc_sig_max_signature_size(sig));
+            size_t l = 0;
+            if (pk && sk && sg && pqc_sig_keygen(sig, pk, sk) == PQC_OK) {
+                check(pqc_sig_sign_ctx(sig, sg, &l, msg, sizeof msg,
+                                       ctx_a, sizeof ctx_a - 1, sk)
+                          == PQC_ERROR_NOT_SUPPORTED,
+                      "SPHINCS+ (no ctx input): non-empty ctx -> NOT_SUPPORTED");
+                check(pqc_sig_sign_ctx(sig, sg, &l, msg, sizeof msg, NULL, 0, sk) == PQC_OK &&
+                      pqc_sig_verify(sig, msg, sizeof msg, sg, l, pk) == PQC_OK,
+                      "SPHINCS+ (no ctx input): empty ctx == plain sign");
+            }
+            free(pk); free(sk); free(sg);
+            pqc_sig_free(sig);
+        }
     }
 }
 
@@ -582,10 +825,14 @@ int main(int argc, char **argv)
     RUN("wotsrt",  test_xmss_wots_roundtrip);
     RUN("addr",    test_xmss_addr_fields);
 #endif
+#ifdef PQC_TEST_SLHDSA_INTERNALS
+    RUN("slhdsa",  test_slhdsa_invariants);
+#endif
     RUN("checksum",test_xmss_checksum);
     RUN("stateful",test_stateful_roundtrip);
     RUN("veriflen",test_verify_length_validation);
     RUN("kem",     test_kem_implicit_rejection);
+    RUN("ctx",     test_sig_context);
 
     pqc_cleanup();
 

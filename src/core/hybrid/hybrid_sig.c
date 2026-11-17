@@ -69,7 +69,8 @@ static pqc_status_t hybrid_mldsa65_ed25519_sign(uint8_t *sig, size_t *siglen,
 
     /* ML-DSA-65 signing */
     size_t mldsa_siglen = 0;
-    rc = pqc_mldsa_sign(&PQC_MLDSA_65, sig, &mldsa_siglen, msg, msglen, sk);
+    rc = pqc_mldsa_sign(&PQC_MLDSA_65, sig, &mldsa_siglen, msg, msglen,
+                        NULL, 0, sk);
     if (rc != PQC_OK)
         return rc;
 
@@ -91,7 +92,7 @@ static pqc_status_t hybrid_mldsa65_ed25519_verify(const uint8_t *msg, size_t msg
         return PQC_ERROR_INVALID_ARGUMENT;
 
     /* Verify ML-DSA-65 signature */
-    pqc_status_t rc = pqc_mldsa_verify(&PQC_MLDSA_65, msg, msglen,
+    pqc_status_t rc = pqc_mldsa_verify(&PQC_MLDSA_65, msg, msglen, NULL, 0,
                                          sig, MLDSA65_SIG_BYTES, pk);
     if (rc != PQC_OK)
         return rc;
@@ -149,7 +150,8 @@ static pqc_status_t hybrid_mldsa87_p256_sign(uint8_t *sig, size_t *siglen,
 
     /* ML-DSA-87 signing */
     size_t mldsa_siglen = 0;
-    rc = pqc_mldsa_sign(&PQC_MLDSA_87, sig, &mldsa_siglen, msg, msglen, sk);
+    rc = pqc_mldsa_sign(&PQC_MLDSA_87, sig, &mldsa_siglen, msg, msglen,
+                        NULL, 0, sk);
     if (rc != PQC_OK)
         return rc;
 
@@ -171,7 +173,7 @@ static pqc_status_t hybrid_mldsa87_p256_verify(const uint8_t *msg, size_t msglen
         return PQC_ERROR_INVALID_ARGUMENT;
 
     /* Verify ML-DSA-87 signature */
-    pqc_status_t rc = pqc_mldsa_verify(&PQC_MLDSA_87, msg, msglen,
+    pqc_status_t rc = pqc_mldsa_verify(&PQC_MLDSA_87, msg, msglen, NULL, 0,
                                          sig, MLDSA87_SIG_BYTES, pk);
     if (rc != PQC_OK)
         return rc;

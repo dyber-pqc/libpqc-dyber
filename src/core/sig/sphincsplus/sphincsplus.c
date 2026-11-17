@@ -74,7 +74,7 @@ static pqc_status_t sphincs_sign_##idx(uint8_t *sig, size_t *siglen,            
                                         const uint8_t *msg, size_t msglen,      \
                                         const uint8_t *sk)                      \
 {                                                                                \
-    int rc = pqc_slhdsa_sign(sig, siglen, msg, msglen, sk,                      \
+    int rc = pqc_slhdsa_sign(sig, siglen, NULL, 0, msg, msglen, sk,             \
                               sphincs_mappings[idx].params);                     \
     return (rc == 0) ? PQC_OK : PQC_ERROR_INTERNAL;                             \
 }                                                                                \
@@ -83,7 +83,7 @@ static pqc_status_t sphincs_verify_##idx(const uint8_t *msg, size_t msglen,     
                                           const uint8_t *sig, size_t siglen,    \
                                           const uint8_t *pk)                    \
 {                                                                                \
-    int rc = pqc_slhdsa_verify(msg, msglen, sig, siglen, pk,                    \
+    int rc = pqc_slhdsa_verify(NULL, 0, msg, msglen, sig, siglen, pk,             \
                                 sphincs_mappings[idx].params);                   \
     return (rc == 0) ? PQC_OK : PQC_ERROR_VERIFICATION_FAILED;                  \
 }

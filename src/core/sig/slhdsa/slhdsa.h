@@ -26,6 +26,8 @@ void slhdsa_set_layer_addr(uint8_t addr[32], uint32_t layer);
 void slhdsa_set_tree_addr(uint8_t addr[32], uint64_t tree);
 void slhdsa_set_type(uint8_t addr[32], uint32_t type);
 void slhdsa_set_keypair_addr(uint8_t addr[32], uint32_t keypair);
+uint32_t slhdsa_get_keypair_addr(const uint8_t addr[32]);
+void slhdsa_set_type_keep_keypair(uint8_t addr[32], uint32_t type);
 void slhdsa_set_chain_addr(uint8_t addr[32], uint32_t chain);
 void slhdsa_set_hash_addr(uint8_t addr[32], uint32_t hash);
 void slhdsa_set_tree_height(uint8_t addr[32], uint32_t height);
@@ -33,9 +35,18 @@ void slhdsa_set_tree_index(uint8_t addr[32], uint32_t index);
 void slhdsa_copy_subtree_addr(uint8_t out[32], const uint8_t in[32]);
 void slhdsa_copy_keypair_addr(uint8_t out[32], const uint8_t in[32]);
 
+#define SLHDSA_ADRSC_BYTES 22
+void slhdsa_compress_addr(uint8_t out[SLHDSA_ADRSC_BYTES], const uint8_t addr[32]);
+
 /* ------------------------------------------------------------------ */
 /* Tweakable hash — SHA-2 instantiation                                 */
 /* ------------------------------------------------------------------ */
+
+/*
+ * PRF_msg and H_msg below hash the message as pfx || msg. pfx carries the
+ * FIPS 205 section 10.2 prefix 0x00 || |ctx| || ctx for SLH-DSA, and is
+ * empty for the SPHINCS+ round-3 names, which predate it.
+ */
 
 void slhdsa_thash_sha2(uint8_t *out,
                         const uint8_t *in, uint32_t inblocks,
@@ -52,12 +63,14 @@ void slhdsa_prf_sha2(uint8_t *out,
 void slhdsa_prf_msg_sha2(uint8_t *out,
                           const uint8_t *sk_prf,
                           const uint8_t *opt_rand,
+                          const uint8_t *pfx, size_t pfxlen,
                           const uint8_t *msg, size_t msglen,
                           const slhdsa_params_t *p);
 
 void slhdsa_hash_msg_sha2(uint8_t *out,
                            const uint8_t *r,
                            const uint8_t *pk,
+                           const uint8_t *pfx, size_t pfxlen,
                            const uint8_t *msg, size_t msglen,
                            const slhdsa_params_t *p);
 
@@ -80,12 +93,14 @@ void slhdsa_prf_shake(uint8_t *out,
 void slhdsa_prf_msg_shake(uint8_t *out,
                            const uint8_t *sk_prf,
                            const uint8_t *opt_rand,
+                           const uint8_t *pfx, size_t pfxlen,
                            const uint8_t *msg, size_t msglen,
                            const slhdsa_params_t *p);
 
 void slhdsa_hash_msg_shake(uint8_t *out,
                             const uint8_t *r,
                             const uint8_t *pk,
+                            const uint8_t *pfx, size_t pfxlen,
                             const uint8_t *msg, size_t msglen,
                             const slhdsa_params_t *p);
 
@@ -108,12 +123,14 @@ void slhdsa_prf(uint8_t *out,
 void slhdsa_prf_msg(uint8_t *out,
                      const uint8_t *sk_prf,
                      const uint8_t *opt_rand,
+                     const uint8_t *pfx, size_t pfxlen,
                      const uint8_t *msg, size_t msglen,
                      const slhdsa_params_t *p);
 
 void slhdsa_hash_msg(uint8_t *out,
                       const uint8_t *r,
                       const uint8_t *pk,
+                      const uint8_t *pfx, size_t pfxlen,
                       const uint8_t *msg, size_t msglen,
                       const slhdsa_params_t *p);
 
@@ -216,15 +233,37 @@ int slhdsa_ht_verify(const uint8_t *msg,
 int pqc_slhdsa_keygen(uint8_t *pk, uint8_t *sk,
                        const slhdsa_params_t *p);
 
+/* Longest FIPS 205 context string (length-prefixed in one byte). */
+#define SLHDSA_MAX_CTX_BYTES 255
+
+/*
+ * Sign / verify M' = pfx || msg. pqc_slhdsa_sign_ctx() and
+ * pqc_slhdsa_verify_ctx() build pfx from a context string as FIPS 205
+ * Algorithms 22 and 24 do; pfx = NULL gives the SPHINCS+ (no prefix) form.
+ */
 int pqc_slhdsa_sign(uint8_t *sig, size_t *siglen,
+                     const uint8_t *pfx, size_t pfxlen,
                      const uint8_t *msg, size_t msglen,
                      const uint8_t *sk,
                      const slhdsa_params_t *p);
 
-int pqc_slhdsa_verify(const uint8_t *msg, size_t msglen,
+int pqc_slhdsa_verify(const uint8_t *pfx, size_t pfxlen,
+                       const uint8_t *msg, size_t msglen,
                        const uint8_t *sig, size_t siglen,
                        const uint8_t *pk,
                        const slhdsa_params_t *p);
+
+int pqc_slhdsa_sign_ctx(uint8_t *sig, size_t *siglen,
+                         const uint8_t *msg, size_t msglen,
+                         const uint8_t *ctx, size_t ctxlen,
+                         const uint8_t *sk,
+                         const slhdsa_params_t *p);
+
+int pqc_slhdsa_verify_ctx(const uint8_t *msg, size_t msglen,
+                           const uint8_t *ctx, size_t ctxlen,
+                           const uint8_t *sig, size_t siglen,
+                           const uint8_t *pk,
+                           const slhdsa_params_t *p);
 
 #ifdef __cplusplus
 }
