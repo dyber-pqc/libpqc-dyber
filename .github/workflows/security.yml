@@ -108,12 +108,17 @@ jobs:
       - name: Build with UBSan
         env:
           CC: clang
+        # -O1: UBSan inserts its checks before optimization, so all of them
+        # are kept, but at -O0 the hash-heavy suites crawl: run in parallel,
+        # test_security_audit and test_openssl_interop exceeded their ctest
+        # timeouts (with no UBSan finding). -O1 is the usual setting for
+        # sanitizer builds.
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
             -DPQC_BUILD_BENCHMARKS=OFF \
-            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g -O1" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined"
           cmake --build build
       - name: Run all tests under UBSan
