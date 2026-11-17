@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completed suite had passed, and `continue-on-error` reported it as
   advisory. The suites now run in parallel within a 90-minute limit, and a
   finding or a timeout fails the run.
+- CI: the per-commit Sanitizers (address, undefined, memory) jobs in
+  `ci.yml` are now gates too. They were advisory, and the UBSan job did not
+  set `halt_on_error`, so undefined behaviour was printed but never failed a
+  test. They now set it, build UBSan at -O1 and run the suites in parallel.
 
 ### Added
 

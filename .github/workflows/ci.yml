@@ -184,9 +184,9 @@ jobs:
   sanitizers:
     name: Sanitizers (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    # Sanitizers may flag issues in algorithms under development; treat as advisory
-    continue-on-error: true
+    # A real gate: a sanitizer finding or a timeout fails the run. This was
+    # advisory (continue-on-error), so a finding here never failed CI.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -204,6 +204,11 @@ jobs:
           if [ "${{ matrix.sanitizer }}" = "memory" ]; then
             SANITIZER_FLAGS="$SANITIZER_FLAGS -fsanitize-memory-track-origins"
           fi
+          # UBSan at -O1, as in security.yml: the checks are inserted before
+          # optimization, and at -O0 the hash-heavy suites time out.
+          if [ "${{ matrix.sanitizer }}" = "undefined" ]; then
+            SANITIZER_FLAGS="$SANITIZER_FLAGS -O1"
+          fi
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPQC_BUILD_TESTS=ON \
@@ -212,6 +217,11 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
+        env:
+          # Without halt_on_error UBSan prints a report and carries on, so the
+          # test still passes; the gate would never see the finding.
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+          ASAN_OPTIONS: "detect_leaks=1:detect_stack_use_after_return=1:check_initialization_order=1"
         run: |
           if [ "${{ matrix.sanitizer }}" = "memory" ]; then
             # MSan with origins tracking is slow enough that the hash-heavy
@@ -225,11 +235,12 @@ jobs:
             # test_kat_slhdsa and test_kat_bike (300 BIKE key generations,
             # encapsulations and decapsulations) exceed the timeout under
             # MSan; both run in the KAT job and under ASan and UBSan.
-            ctest --test-dir build --output-on-failure --timeout 1800 \
+            ctest --test-dir build --output-on-failure --parallel "$(nproc)" --timeout 1800 \
               --exclude-regex "test_sig|test_security_audit|test_fndsa_quick|test_kat_slhdsa|test_kat_bike" \
               --label-exclude interop
           else
-            ctest --test-dir build --output-on-failure --timeout 1800
+            # The suites are independent; run them in parallel.
+            ctest --test-dir build --output-on-failure --parallel "$(nproc)" --timeout 1800
           fi
 
   valgrind:
