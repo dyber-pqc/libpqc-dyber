@@ -100,11 +100,9 @@ endif()
 if(PQC_ENABLE_KEM_HQC)
     list(APPEND PQC_KEM_SOURCES
         src/core/kem/hqc/hqc.c
-        src/core/kem/hqc/gf.c
-        src/core/kem/hqc/reed_solomon.c
-        src/core/kem/hqc/reed_muller.c
-        src/core/kem/hqc/code.c
-        src/core/kem/hqc/parsing.c
+        src/core/kem/hqc/hqc1.c
+        src/core/kem/hqc/hqc3.c
+        src/core/kem/hqc/hqc5.c
     )
 endif()
 if(PQC_ENABLE_KEM_BIKE)

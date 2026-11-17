@@ -11,7 +11,7 @@ in any application that uses OpenSSL, including TLS 1.3 hybrid key exchange.
 | Algorithm | NIST Level | Standard |
 |-----------|-----------|----------|
 | ML-KEM-512 / 768 / 1024 | 1 / 3 / 5 | FIPS 203 |
-| HQC-128 / 192 / 256 | 1 / 3 / 5 | NIST Round 4 |
+| HQC-128 / 192 / 256 | 1 / 3 / 5 | HQC v5.1 (FIPS 207 pending) |
 | BIKE-L1 / L3 / L5 | 1 / 3 / 5 | NIST Round 4 |
 | Classic McEliece (5 variants) | 1-5 | NIST Round 4 |
 | FrodoKEM (6 variants) | 1 / 3 / 5 | Conservative |

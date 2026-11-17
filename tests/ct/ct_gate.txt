@@ -49,6 +49,12 @@ BIKE-L1
 BIKE-L3
 BIKE-L5
 
+# HQC (v5.1, reproduces the official KATs; the key sampler's rejection
+# count is declassified, see src/core/kem/hqc/README.md)
+HQC-128
+HQC-192
+HQC-256
+
 # FrodoKEM
 FrodoKEM-640-AES
 FrodoKEM-640-SHAKE
